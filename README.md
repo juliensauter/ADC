@@ -90,5 +90,12 @@ If you find our work useful in your research or if you use parts of this code, p
   journal={arXiv preprint arXiv:2507.23652},
   year={2025}
 }
+
+@article{qiu2025noise,
+  title={Noise-Consistent Siamese-Diffusion for Medical Image Synthesis and Segmentation},
+  author={Qiu, Kunpeng and Gao, Zhiqiang and Zhou, Zhiying and Sun, Mingjie and Guo, Yongxin},
+  journal={arXiv preprint arXiv:2505.06068},
+  year={2025}
+}
 ```
 
