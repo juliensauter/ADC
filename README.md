@@ -30,8 +30,8 @@ Even without using the plug-and-play `Online-Augmentation` module from [Siamese-
 ### 🛠️ Requirements
 The usual installation steps involve the following commands, they should set up the correct CUDA version and all the python packages:
 ```bash
-conda create -n Siamese-Diffusion python=3.10
-conda activate  Siamese-Diffusion
+conda create -n ADC python=3.10
+conda activate  ADC
 conda install pytorch==2.4.0 torchvision==0.19.0  pytorch-cuda=11.8 -c pytorch -c nvidia
 pip install -U xformers --index-url https://download.pytorch.org/whl/cu118
 pip install deepspeed
