@@ -27,6 +27,14 @@ Even without using the plug-and-play `Online-Augmentation` module from [Siamese-
 #### Polyp Visualization (RGB)
 ![Polyp Visualization](images/figure4.png)
 
+### 📥 Download
+We provide the model weights and synthesized datasets (Polyps) on **Hugging Face**.
+
+| Resource | Description | Link |
+| :--- | :--- | :--- |
+| **Model Weights** | Checkpoints for ADC (Polyps) | [🤗 Hugging Face](https://huggingface.co/SylarQ/ADC) |
+| **Datasets** | Synthesized Polyps Images | [🤗 Hugging Face](https://huggingface.co/datasets/SylarQ/ADC) |
+
 ### 🛠️ Requirements
 The usual installation steps involve the following commands, they should set up the correct CUDA version and all the python packages:
 ```bash
