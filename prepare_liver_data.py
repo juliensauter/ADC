@@ -178,10 +178,16 @@ def main():
     # Also write a combined prompt.json at the top level (for when val_split=0 or testing)
     combined_path = out / "prompt.json"
     with open(combined_path, "w") as f:
-        for idx, (img_p, mask_p) in enumerate(train_pairs + val_pairs):
+        for idx, (img_p, mask_p) in enumerate(train_pairs):
             f.write(json.dumps({
                 "source": f"data/train/masks/{idx:06d}.png",
                 "target": f"data/train/images/{idx:06d}.png",
+                "prompt_target": args.prompt,
+            }) + "\n")
+        for idx, (img_p, mask_p) in enumerate(val_pairs):
+            f.write(json.dumps({
+                "source": f"data/val/masks/{idx:06d}.png",
+                "target": f"data/val/images/{idx:06d}.png",
                 "prompt_target": args.prompt,
             }) + "\n")
 

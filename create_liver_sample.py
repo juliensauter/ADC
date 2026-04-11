@@ -39,4 +39,11 @@ with open("data/prompt.json", "w") as f:
 print("Liver mask + prompt.json written OK")
 print(f"  Mask:   data/masks/liver_001.png")
 print(f"  Prompt: {entry['prompt_target']}")
-subprocess.run(["open", "data/masks/liver_001.png"])
+
+import platform
+if platform.system() == "Darwin":
+    subprocess.run(["open", "data/masks/liver_001.png"])
+elif platform.system() == "Linux":
+    subprocess.run(["xdg-open", "data/masks/liver_001.png"])
+else:
+    print("  Open data/masks/liver_001.png manually to preview.")

@@ -7,7 +7,9 @@ try:
     from huggingface_hub import hf_hub_download
 except ImportError:
     import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "huggingface_hub"])
+    import shutil
+    pip_cmd = ["uv", "pip", "install"] if shutil.which("uv") else [sys.executable, "-m", "pip", "install"]
+    subprocess.check_call(pip_cmd + ["huggingface_hub"])
     from huggingface_hub import hf_hub_download
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

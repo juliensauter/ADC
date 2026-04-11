@@ -27,6 +27,65 @@ Even without using the plug-and-play `Online-Augmentation` module from [Siamese-
 #### Polyp Visualization (RGB)
 ![Polyp Visualization](images/figure4.png)
 
+---
+
+## 🔧 Fork: Liver Surgery Adaptation (juliensauter/ADC)
+
+This fork adds MPS (Apple Silicon) compatibility, liver surgery adaptation scripts,
+and a one-command setup for colleagues. All upstream functionality is preserved.
+
+### Quick Start
+```bash
+# Clone with submodule
+git clone --recurse-submodules <livervision-repo-url>
+cd livervision/Research_Projects/ADC
+
+# One-command setup: installs deps, downloads weights (~17 GB), creates training checkpoint
+uv run python setup_adc.py
+
+# Run inference demo
+uv run python tutorial_inference_local.py
+
+# Train on your data
+uv run python prepare_liver_data.py --src /path/to/your/data --out ./data
+uv run python tutorial_train_single_gpu.py
+```
+
+### File Map
+
+| File | Category | Description |
+|------|----------|-------------|
+| **`setup_adc.py`** | 🚀 Setup | One-command project setup (deps + weights + checkpoint) |
+| **`tutorial_inference_local.py`** | 🎨 Inference | MPS/CPU/CUDA inference (replaces `tutorial_inference.py`) |
+| **`tutorial_train_single_gpu.py`** | 🏋️ Training | 1-line hardware switch: `"mps"` / `"dgx_single"` / `"dgx_multi"` |
+| **`prepare_liver_data.py`** | 📦 Data | Converts raw images+masks into ADC format, splits train/val |
+| **`evaluate_adc.py`** | 📊 Evaluation | FID, SSIM, LPIPS metrics between real and generated images |
+| **`segmentation_integration.py`** | 🧩 Integration | Joint ADC + segmentation model training (Strategy A: differentiable, Strategy B: 2-stage) |
+| `create_control_ckpt.py` | 🔧 Utility | Creates `control_sd15.ckpt` from SD v1.5 (called by `setup_adc.py`) |
+| `download_weights.py` | 🔧 Utility | Downloads SD v1.5 + ADC weights from HuggingFace |
+| `create_sample_data.py` | 🧪 Demo | Creates synthetic polyp mask for testing |
+| `create_liver_sample.py` | 🧪 Demo | Creates synthetic liver mask for testing |
+
+**Upstream files** (original ADC repo): `config.py`, `share.py`, `tutorial_dataset*.py`, `tutorial_inference.py`, `tutorial_train.py`, `tool_*.py`, `cldm/`, `ldm/`, `models/`
+
+### Upstream Fixes Applied
+- `openaimodel.py`: Missing `import copy` (bug)
+- `modules.py`: Dynamic CLIP device (MPS/CPU/CUDA)
+- `ddim.py`: Float32 cast + dynamic device for MPS
+- `model.py`: `weights_only=False` for PyTorch ≥2.6
+- `util.py`: Font fallback when `DejaVuSans.ttf` missing
+- `tutorial_dataset.py`: Configurable data path
+
+### Hardware Switch
+Change one line in `tutorial_train_single_gpu.py`:
+```python
+TRAINING_TARGET = "mps"          # Apple Silicon (local testing)
+TRAINING_TARGET = "dgx_single"   # Single A100 GPU
+TRAINING_TARGET = "dgx_multi"    # Multi-GPU (uses all visible GPUs)
+```
+
+---
+
 ### 📥 Download
 We provide the model weights and synthesized datasets (Polyps) on **Hugging Face**.
 
