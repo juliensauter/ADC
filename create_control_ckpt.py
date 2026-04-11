@@ -10,9 +10,12 @@ Equivalent to:
         stable-diffusion-v1-5/control_sd15.ckpt
 
 Run once before training to produce the ADC base checkpoint.
+
+Memory-optimised: peak ~12 GB RAM instead of ~25 GB.
 """
 import os
 import sys
+import gc
 
 # Always run from the ADC project directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -41,24 +44,30 @@ def get_node_name(name, parent_name):
 
 
 print(f"Loading SD v1.5 weights from {INPUT_PATH} ...")
-model = create_model(config_path="./models/cldm_v15.yaml")
 
+# Step 1: Load pretrained weights
 # weights_only=False needed: SD v1.5 .ckpt contains PL callback state (PyTorch ≥2.6 changed default)
 pretrained_weights = torch.load(INPUT_PATH, map_location="cpu", weights_only=False)
 if "state_dict" in pretrained_weights:
     pretrained_weights = pretrained_weights["state_dict"]
 
-scratch_dict = model.state_dict()
-target_dict  = {}
+# Step 2: Create model and get its state dict keys (to know the target structure)
+print("Creating ADC model structure...")
+model = create_model(config_path="./models/cldm_v15.yaml")
+scratch_keys = list(model.state_dict().keys())
 
-for k in scratch_dict.keys():
+# Step 3: Build target dict directly — no intermediate scratch_dict copy
+print("Mapping weights...")
+target_dict = {}
+for k in scratch_keys:
     is_control, name = get_node_name(k, "control_")
     copy_k = "model.diffusion_" + name if is_control else k
 
     if copy_k in pretrained_weights:
         target_dict[k] = pretrained_weights[copy_k].clone()
     else:
-        target_dict[k] = scratch_dict[k].clone()
+        # Keep the randomly initialised value from model for this key
+        target_dict[k] = model.state_dict()[k].clone()
 
     # image_ decoder layers ← copy from corresponding SD output layers
     if k.startswith("model.diffusion_model.image_"):
@@ -66,7 +75,20 @@ for k in scratch_dict.keys():
         if output_layer in pretrained_weights:
             target_dict[k] = pretrained_weights[output_layer].clone()
 
+# Step 4: Free pretrained weights before loading into model
+del pretrained_weights
+gc.collect()
+
+# Step 5: Load and save
+print("Loading mapped weights into model...")
 model.load_state_dict(target_dict, strict=True)
+del target_dict
+gc.collect()
+
+print(f"Saving to {OUTPUT_PATH} ...")
 torch.save(model.state_dict(), OUTPUT_PATH)
+del model
+gc.collect()
+
 print(f"Saved: {OUTPUT_PATH}")
 print("Done — control_sd15.ckpt ready for training.")
