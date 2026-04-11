@@ -61,14 +61,14 @@ RESUME_PATH  = None          # Set to .ckpt path to resume, else None
 # Data config — set DATA_ROOT to your prepared liver data folder
 # Run: uv run python prepare_liver_data.py --src /path/to/raw --out ./data
 # ──────────────────────────────────────────────────────────────────────────────
-DATA_ROOT    = './data/prompt.json'         # prompt.json path (train split)
-# DATA_ROOT  = './data/train/prompt.json'   # if using prepare_liver_data.py split
+DATA_ROOT    = './data/train/prompt.json'   # train split (default for prepare_liver_data.py)
+# DATA_ROOT  = './data/prompt.json'          # combined (⚠ includes test — only for quick demos)
 
 LOGGER_FREQ  = 400
 LR           = 1e-5
 MAX_STEPS    = 3000          # 1000 for quick domain tests, 3000 for full training
-SD_LOCKED    = False         # True = only train ControlNets (saves memory, avoids forgetting)
-                             # Recommended: start with True for small datasets (<2000 images)
+SD_LOCKED    = True          # True = only train ControlNets (saves memory, avoids forgetting)
+                             # False = also fine-tune SD UNet decoder (risk of forgetting on <2k images)
 ONLY_MID_CTRL = False
 STRICT_LOAD  = True          # False when loading ADC polyp weights (key mismatch ok)
 

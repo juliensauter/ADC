@@ -61,7 +61,14 @@ print("Mapping weights...")
 target_dict = {}
 for k in scratch_keys:
     is_control, name = get_node_name(k, "control_")
-    copy_k = "model.diffusion_" + name if is_control else k
+    is_image_control, image_name = get_node_name(k, "image_control_")
+    if is_control:
+        copy_k = "model.diffusion_" + name
+    elif is_image_control:
+        # image_control_model.* → model.diffusion_model.* (same encoder architecture)
+        copy_k = "model.diffusion_" + image_name
+    else:
+        copy_k = k
 
     if copy_k in pretrained_weights:
         target_dict[k] = pretrained_weights[copy_k].clone()

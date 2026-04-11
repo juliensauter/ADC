@@ -106,10 +106,13 @@ class SingleStepADCSegmentation(nn.Module):
         self.t_fixed   = t_fixed
 
     def decode_latent(self, z: torch.Tensor) -> torch.Tensor:
-        """Decode latent to pixel space using VAE: [B, 4, H/8, W/8] → [B, 3, H, W] in [-1, 1]"""
-        with torch.no_grad():
-            # Scale factor from ADC config: 1/0.18215
-            z_scaled = 1.0 / self.adc.scale_factor * z
+        """Decode latent to pixel space using VAE: [B, 4, H/8, W/8] → [B, 3, H, W] in [-1, 1]
+
+        NOTE: no torch.no_grad() here — Strategy A requires gradients to flow
+        back through the VAE decoder → UNet → ControlNet for the seg loss.
+        """
+        # Scale factor from ADC config: 1/0.18215
+        z_scaled = 1.0 / self.adc.scale_factor * z
         x = self.adc.first_stage_model.decode(z_scaled)
         return x  # [-1, 1]
 

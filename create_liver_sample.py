@@ -1,4 +1,8 @@
-"""Create a synthetic liver-shaped mask for ADC inference demo."""
+"""Create a synthetic liver-shaped mask for ADC inference demo.
+
+NOTE: This writes to data/demo_prompt.json (not data/prompt.json) to avoid
+overwriting real training data produced by prepare_liver_data.py.
+"""
 import os, json, subprocess
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -33,10 +37,10 @@ entry = {
     "target": "data/images/liver_001.png",
     "prompt_target": "laparoscopic view of liver surface, hepatic tissue texture, surgical lighting, intraoperative photograph"
 }
-with open("data/prompt.json", "w") as f:
+with open("data/demo_prompt.json", "w") as f:
     f.write(json.dumps(entry) + "\n")
 
-print("Liver mask + prompt.json written OK")
+print("Liver mask + demo_prompt.json written OK")
 print(f"  Mask:   data/masks/liver_001.png")
 print(f"  Prompt: {entry['prompt_target']}")
 

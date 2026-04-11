@@ -1,8 +1,11 @@
 import einops
+import logging
 import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 from ldm.modules.diffusionmodules.util import (
     conv_nd,
@@ -36,6 +39,8 @@ class ControlledUnetModel(UNetModel):
             h = self.middle_block(h, emb, context)
 
         if image_control is not None:
+            # NOTE: deepcopy doubles GPU feature memory. Necessary because both
+            # branches (mask + image ControlNet) need independent decoder paths.
             image_h = copy.deepcopy(h)
             image_hs = copy.deepcopy(hs)
 
@@ -508,6 +513,13 @@ class ControlLDM(LatentDiffusion):
 
         weights_ones = torch.ones_like(t).to(x_start.device)
 
+        # ADC staged training weights:
+        #   Phase 1: weights_mask=1, weights_image=0 → train mask ControlNet only
+        #   Phase 2: set weights_image>0 to activate image ControlNet training
+        # NOTE: with weights_image=0, image_control_model gets no gradient from
+        # loss but IS in the optimizer. AdamW weight decay will slowly shrink its
+        # weights. For liver training, consider enabling weights_image after the
+        # mask branch has converged (e.g. after 1000+ steps).
         weights_mask = 1.0 * weights_ones  # Loss 0
         weights_image = 0.0 * weights_ones  # Loss 1
         weights_mask_2_image = 0.0 * weights_ones  # Loss 2
@@ -538,16 +550,16 @@ class ControlLDM(LatentDiffusion):
             raise NotImplementedError()
 
         loss_simple = weights_mask * self.get_loss(model_output[0], target, mean=False).mean([1, 2, 3])
-        print(f"loss_simple_mask: {loss_simple.mean()}")
+        logger.debug("loss_simple_mask: %s", loss_simple.mean())
 
         if weights_image.all():
             loss_simple_image = self.get_loss(model_output[1], target, mean=False).mean([1, 2, 3])
-            print(f"loss_simple_image: {loss_simple_image.mean()}")
+            logger.debug("loss_simple_image: %s", loss_simple_image.mean())
             loss_simple = loss_simple + weights_image * loss_simple_image
 
         if weights_mask_2_image.all():
             loss_simple_mask_2_image = (weights * self.get_loss(model_output[0], model_output[1].detach(), mean=False)).mean([1, 2, 3])
-            print(f"loss_simple_mask_2_image: {loss_simple_mask_2_image.mean()}")
+            logger.debug("loss_simple_mask_2_image: %s", loss_simple_mask_2_image.mean())
             loss_simple = loss_simple + weights_mask_2_image * loss_simple_mask_2_image
 
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
