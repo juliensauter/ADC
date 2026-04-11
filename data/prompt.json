@@ -1,1 +1,2 @@
+{"source": "data/masks/sample_001.png", "target": "data/images/sample_001.png", "prompt_target": "a colonoscopy image showing a polyp"}
 {"source": "data/masks/liver_001.png", "target": "data/images/liver_001.png", "prompt_target": "laparoscopic view of liver surface, hepatic tissue texture, surgical lighting, intraoperative photograph"}

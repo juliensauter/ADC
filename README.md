@@ -65,6 +65,9 @@ uv run python tutorial_train_single_gpu.py
 | `download_weights.py` | 🔧 Utility | Downloads SD v1.5 + ADC weights from HuggingFace |
 | `create_sample_data.py` | 🧪 Demo | Creates synthetic polyp mask for testing |
 | `create_liver_sample.py` | 🧪 Demo | Creates synthetic liver mask for testing |
+| `slurm/slurm_setup.sh` | ☁️ Cluster | One-time env + weight download on SLURM |
+| `slurm/slurm_train.sh` | ☁️ Cluster | Training job — auto-patches TRAINING_TARGET |
+| `slurm/slurm_inference.sh` | ☁️ Cluster | Inference job — configurable via env vars |
 
 **Upstream files** (original ADC repo): `config.py`, `share.py`, `tutorial_dataset*.py`, `tutorial_inference.py`, `tutorial_train.py`, `tool_*.py`, `cldm/`, `ldm/`, `models/`
 
@@ -97,13 +100,13 @@ cd ADC   # or livervision/Research_Projects/ADC
 
 # One-time setup (installs deps, downloads ~17 GB weights) — runs as a SLURM job
 mkdir -p logs
-sbatch slurm_setup.sh
+sbatch slurm/slurm_setup.sh
 
 # Train (1 GPU default, override with --gres=gpu:2 for multi-GPU)
-sbatch slurm_train.sh
+sbatch slurm/slurm_train.sh
 
 # Inference (single GPU, fast)
-sbatch slurm_inference.sh
+sbatch slurm/slurm_inference.sh
 
 # Check job status
 squeue -u $USER
@@ -114,11 +117,22 @@ tail -f logs/adc_train_<jobid>.out
 
 | Script | Purpose |
 |--------|---------|
-| `slurm_setup.sh` | One-time env + weight download (submits `setup_adc.py` as job) |
-| `slurm_train.sh` | Training job — auto-patches `TRAINING_TARGET` for single/multi GPU |
-| `slurm_inference.sh` | Inference job — configurable via env vars (`CKPT`, `DDIM_STEPS`) |
+| `slurm/slurm_setup.sh` | One-time env + weight download (submits `setup_adc.py` as job) |
+| `slurm/slurm_train.sh` | Training job — auto-patches `TRAINING_TARGET` for single/multi GPU |
+| `slurm/slurm_inference.sh` | Inference job — configurable via env vars (`CKPT`, `DDIM_STEPS`) |
 
 **Cluster details:** `dgx_01` partition — 8× NVIDIA H100, 224 CPUs, 2 TB RAM. QoS typically limits to 4 GPUs, 2 concurrent jobs. Shared NFS at `/mnt/home/`, ephemeral scratch at `/scratch/`.
+
+### Example Outputs
+Pre-generated examples (10 DDIM steps, ADC polyp weights, MPS) in `examples/`:
+
+| Mask | Generated |
+|------|-----------|
+| ![polyp mask](examples/polyp_mask.png) | ![polyp output](examples/polyp_10step.png) |
+| ![liver mask](examples/liver_mask.png) | ![liver output](examples/liver_10step.png) |
+
+> The liver output resembles a polyp because the model is trained on polyp data only.
+> After fine-tuning on liver surgery data, liver-conditioned outputs will look realistic.
 
 ---
 
