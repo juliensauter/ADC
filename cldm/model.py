@@ -26,7 +26,9 @@ def load_state_dict(ckpt_path, location='cpu', exclude_buffers=None):
         import safetensors.torch
         state_dict = safetensors.torch.load_file(ckpt_path, device=location).to(torch.float16)
     else:
-        state_dict = get_state_dict(torch.load(ckpt_path, map_location=torch.device(location)))
+        # weights_only=False needed: older .ckpt files (SD v1.5, ADC) may contain
+        # non-tensor Python objects (e.g. PL callbacks). Safe for trusted checkpoints.
+        state_dict = get_state_dict(torch.load(ckpt_path, map_location=torch.device(location), weights_only=False))
 
     if exclude_buffers:
         state_dict = {k: v for k, v in state_dict.items() if not any(buf_name in k for buf_name in exclude_buffers)}

@@ -1,0 +1,17 @@
+# Model weights (re-downloadable via download_weights.py)
+adc_weights/
+stable-diffusion-v1-5/
+
+# Generated output
+generated_results/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Test/synthetic data (regeneratable via create_sample_data.py / create_liver_sample.py)
+data/images/
+data/masks/

@@ -15,9 +15,11 @@ class DDIMSampler(object):
         self.schedule = schedule
 
     def register_buffer(self, name, attr):
+        if isinstance(attr, np.ndarray):
+            attr = torch.from_numpy(attr)
         if type(attr) == torch.Tensor:
-            if attr.device != torch.device("cuda"):
-                attr = attr.to(torch.device("cuda"))
+            # MPS (Apple Silicon) does not support float64 — cast to float32, then move to model device
+            attr = attr.float().to(self.model.device)
         setattr(self, name, attr)
 
     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):

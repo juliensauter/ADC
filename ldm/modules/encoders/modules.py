@@ -117,7 +117,9 @@ class FrozenCLIPEmbedder(AbstractEncoder):
     def forward(self, text):
         batch_encoding = self.tokenizer(text, truncation=True, max_length=self.max_length, return_length=True,
                                         return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
-        tokens = batch_encoding["input_ids"].to(self.device)
+        # Use the actual device of transformer parameters (supports MPS/CPU/CUDA regardless of self.device attr)
+        actual_device = next(self.transformer.parameters()).device
+        tokens = batch_encoding["input_ids"].to(actual_device)
         outputs = self.transformer(input_ids=tokens, output_hidden_states=self.layer=="hidden")
         if self.layer == "last":
             z = outputs.last_hidden_state
