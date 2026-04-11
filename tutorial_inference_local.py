@@ -108,11 +108,20 @@ def log_local(save_dir, images, batch_idx):
             fname = f"b-{batch_idx:06d}_idx-{idx}.png"
 
             if k == f"samples_cfg_scale_{CFG_SCALE:.2f}_mask":
-                # Main generated output: [-1,1] → [0,255] RGB
+                # Mask-conditioned output: [-1,1] → [0,255] RGB
                 img = (image + 1.0) / 2.0
                 img = img.permute(1, 2, 0).numpy()
                 img = (img * 255).clip(0, 255).astype(np.uint8)
                 Image.fromarray(img).save(os.path.join(samples_dir, fname))
+
+            elif k == f"samples_cfg_scale_{CFG_SCALE:.2f}_image":
+                # Dual-control (mask+image) output: [-1,1] → [0,255] RGB
+                dual_dir = os.path.join(save_dir, "images_dual")
+                os.makedirs(dual_dir, exist_ok=True)
+                img = (image + 1.0) / 2.0
+                img = img.permute(1, 2, 0).numpy()
+                img = (img * 255).clip(0, 255).astype(np.uint8)
+                Image.fromarray(img).save(os.path.join(dual_dir, fname))
 
             elif k == "control_mask":
                 # Input mask: [0,1] single channel → binary PNG

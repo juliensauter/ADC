@@ -27,6 +27,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=28
 #SBATCH --mem=250G
+#SBATCH --time=24:00:00
 #SBATCH --job-name=adc_train
 #SBATCH --output=/mnt/home/%u/ADC/logs/%x_%j.out
 #SBATCH --error=/mnt/home/%u/ADC/logs/%x_%j.err
@@ -35,6 +36,10 @@
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
+
+# Cleanup patched scripts on exit (success or failure)
+cleanup() { rm -f "${PROJDIR:-/tmp}/.slurm_train_patched.py"; }
+trap cleanup EXIT
 
 PROJDIR="/mnt/home/${USER}/ADC"
 VENVDIR="${PROJDIR}/.venv"
@@ -104,9 +109,6 @@ echo ""
 
 # ── Run training ──────────────────────────────────────────────────────────────
 python "${PATCHED_SCRIPT}"
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
-rm -f "${PATCHED_SCRIPT}"
 
 # If using scratch, copy results back:
 # rsync -a "${SCRATCH}/lightning_logs/" "${PROJDIR}/lightning_logs/"

@@ -54,6 +54,7 @@ pl.seed_everything(42, workers=True)
 # ──────────────────────────────────────────────────────────────────────────────
 CKPT_PATH    = './stable-diffusion-v1-5/control_sd15.ckpt'   # fresh start from SD v1.5
 # CKPT_PATH  = './adc_weights/merged_pytorch_model.pth'        # start from ADC polyp weights (transfer)
+# NOTE: When using ADC polyp weights for transfer learning, also set STRICT_LOAD = False below.
 RESUME_PATH  = None          # Set to .ckpt path to resume, else None
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -66,8 +67,10 @@ DATA_ROOT    = './data/prompt.json'         # prompt.json path (train split)
 LOGGER_FREQ  = 400
 LR           = 1e-5
 MAX_STEPS    = 3000          # 1000 for quick domain tests, 3000 for full training
-SD_LOCKED    = False         # True = only train ControlNets (saves memory)
+SD_LOCKED    = False         # True = only train ControlNets (saves memory, avoids forgetting)
+                             # Recommended: start with True for small datasets (<2000 images)
 ONLY_MID_CTRL = False
+STRICT_LOAD  = True          # False when loading ADC polyp weights (key mismatch ok)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Hardware-specific settings derived from TRAINING_TARGET
@@ -114,7 +117,7 @@ else:
 # Model
 # ──────────────────────────────────────────────────────────────────────────────
 model = create_model('./models/cldm_v15.yaml').cpu()
-model.load_state_dict(load_state_dict(CKPT_PATH, location='cpu'), strict=True)
+model.load_state_dict(load_state_dict(CKPT_PATH, location='cpu'), strict=STRICT_LOAD)
 
 model.learning_rate  = LR
 model.sd_locked      = SD_LOCKED

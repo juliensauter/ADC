@@ -4,6 +4,7 @@ import json
 import numpy as np
 from PIL import Image, ImageDraw
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs("data/masks", exist_ok=True)
 os.makedirs("data/images", exist_ok=True)
 

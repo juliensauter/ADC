@@ -23,6 +23,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
+#SBATCH --time=02:00:00
 #SBATCH --job-name=adc_infer
 #SBATCH --output=/mnt/home/%u/ADC/logs/%x_%j.out
 #SBATCH --error=/mnt/home/%u/ADC/logs/%x_%j.err
@@ -31,6 +32,10 @@
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
+
+# Cleanup patched scripts on exit (success or failure)
+cleanup() { rm -f "${PROJDIR:-/tmp}/.slurm_infer_patched.py"; }
+trap cleanup EXIT
 
 PROJDIR="/mnt/home/${USER}/ADC"
 VENVDIR="${PROJDIR}/.venv"
@@ -83,9 +88,6 @@ sed \
 echo ""
 echo "Running inference..."
 python "${PATCHED}"
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
-rm -f "${PATCHED}"
 
 echo ""
 echo "════════════════════════════════════════════════════════════"

@@ -34,7 +34,7 @@ entry = {
     "prompt_target": "laparoscopic view of liver surface, hepatic tissue texture, surgical lighting, intraoperative photograph"
 }
 with open("data/prompt.json", "w") as f:
-    json.dump(entry, f)
+    f.write(json.dumps(entry) + "\n")
 
 print("Liver mask + prompt.json written OK")
 print(f"  Mask:   data/masks/liver_001.png")

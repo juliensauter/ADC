@@ -1,4 +1,3 @@
-import cv2
 import json
 import random
 import numpy as np
@@ -14,6 +13,9 @@ class MyDataset(Dataset):
         with open(root, 'rt') as f:
             for line in f:
                 self.data.append(json.loads(line))
+        self._transform = albumentations.Compose(
+            [albumentations.Resize(height=384, width=384)]
+        )
 
     def __len__(self):
         return len(self.data)
@@ -41,7 +43,7 @@ class MyDataset(Dataset):
         source = np.array(source).astype(np.uint8)
         target = np.array(target).astype(np.uint8)
 
-        preprocess = self.transform()(image=target, mask=source)
+        preprocess = self._transform(image=target, mask=source)
         source, target = preprocess['mask'], preprocess['image']
 
         ############ Mask-Image Pair ############
@@ -49,11 +51,3 @@ class MyDataset(Dataset):
         target = target.astype(np.float32) / 127.5 - 1.0
 
         return dict(jpg=target, txt=prompt_target, hint=source)
-
-    def transform(self, size=384):
-        transforms = albumentations.Compose(
-                        [
-                            albumentations.Resize(height=size, width=size)
-                        ]
-                    )
-        return transforms

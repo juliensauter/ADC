@@ -24,7 +24,7 @@ def load_state_dict(ckpt_path, location='cpu', exclude_buffers=None):
     _, extension = os.path.splitext(ckpt_path)
     if extension.lower() == ".safetensors":
         import safetensors.torch
-        state_dict = safetensors.torch.load_file(ckpt_path, device=location).to(torch.float16)
+        state_dict = safetensors.torch.load_file(ckpt_path, device=location)
     else:
         # weights_only=False needed: older .ckpt files (SD v1.5, ADC) may contain
         # non-tensor Python objects (e.g. PL callbacks). Safe for trusted checkpoints.
