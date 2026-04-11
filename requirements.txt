@@ -1,0 +1,23 @@
+# ADC Python dependencies
+# Install with: uv pip install -r requirements.txt
+# Or run: uv run python setup_adc.py --deps-only
+
+# Core
+torch
+torchvision
+pytorch-lightning
+einops
+omegaconf
+albumentations
+transformers
+safetensors
+open-clip-torch
+kornia
+scipy
+opencv-python
+scikit-learn
+huggingface-hub
+
+# Evaluation (optional — needed for evaluate_adc.py)
+torchmetrics[image]
+lpips

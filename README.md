@@ -84,6 +84,42 @@ TRAINING_TARGET = "dgx_single"   # Single A100 GPU
 TRAINING_TARGET = "dgx_multi"    # Multi-GPU (uses all visible GPUs)
 ```
 
+### SLURM Cluster (LRZ DGX H100)
+Job scripts for the university's SLURM cluster are included:
+```bash
+# SSH to submit node (must be on uni network / VPN)
+ssh username@10.215.44.154
+
+# Clone repo to NFS home
+cd /mnt/home/$USER
+git clone --recurse-submodules <livervision-repo-url>
+cd ADC   # or livervision/Research_Projects/ADC
+
+# One-time setup (installs deps, downloads ~17 GB weights) — runs as a SLURM job
+mkdir -p logs
+sbatch slurm_setup.sh
+
+# Train (1 GPU default, override with --gres=gpu:2 for multi-GPU)
+sbatch slurm_train.sh
+
+# Inference (single GPU, fast)
+sbatch slurm_inference.sh
+
+# Check job status
+squeue -u $USER
+
+# View logs
+tail -f logs/adc_train_<jobid>.out
+```
+
+| Script | Purpose |
+|--------|---------|
+| `slurm_setup.sh` | One-time env + weight download (submits `setup_adc.py` as job) |
+| `slurm_train.sh` | Training job — auto-patches `TRAINING_TARGET` for single/multi GPU |
+| `slurm_inference.sh` | Inference job — configurable via env vars (`CKPT`, `DDIM_STEPS`) |
+
+**Cluster details:** `dgx_01` partition — 8× NVIDIA H100, 224 CPUs, 2 TB RAM. QoS typically limits to 4 GPUs, 2 concurrent jobs. Shared NFS at `/mnt/home/`, ephemeral scratch at `/scratch/`.
+
 ---
 
 ### 📥 Download
