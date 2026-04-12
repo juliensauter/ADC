@@ -61,11 +61,12 @@ pl.seed_everything(0, workers=True)
 
 BATCH_SIZE = 1
 # Pretrained ADC polyp weights (downloaded from HuggingFace SylarQ/ADC)
-CKPT_PATH = "./adc_weights/merged_pytorch_model.pth"
+# Override via env: CKPT_PATH=./lightning_logs/.../epoch=0-step=3000.ckpt uv run python ...
+CKPT_PATH = os.environ.get("CKPT_PATH", "./adc_weights/merged_pytorch_model.pth")
 # For a fresh SD v1.5 init (before finetuning):
 # CKPT_PATH = "./stable-diffusion-v1-5/control_sd15.ckpt"
 
-RESULT_DIR = "./generated_results/local_test/"
+RESULT_DIR = os.environ.get("RESULT_DIR", "./generated_results/local_test/")
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 DDIM_STEPS = 10  # 10 for quick demo (~2-4 min on M4 MPS); use 50 for quality

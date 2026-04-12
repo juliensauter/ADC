@@ -41,8 +41,9 @@ from cldm.model import create_model, load_state_dict
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ★ ONE-LINE SWITCH — change this to adapt to your hardware
+#   Can also be set via env var: TRAINING_TARGET=dgx_single uv run python ...
 # ──────────────────────────────────────────────────────────────────────────────
-TRAINING_TARGET = "mps"          # "mps" | "dgx_single" | "dgx_multi"
+TRAINING_TARGET = os.environ.get("TRAINING_TARGET", "mps")  # "mps" | "dgx_single" | "dgx_multi"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Reproducibility

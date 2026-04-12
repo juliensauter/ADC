@@ -186,9 +186,10 @@ def process_pair(img_path, mask_path, out_img_dir, out_mask_dir, size, idx):
     mask = binarize_mask(mask_path)
 
     img  = resize_image(img,  size)
-    mask = resize_image(mask, size)
+    # Use NEAREST for masks to preserve binary values (LANCZOS interpolation
+    # introduces intermediate pixel values, breaking the 0/255 binarization).
+    mask = mask.resize((size, size), Image.NEAREST)
 
-    # Convert binary mask to RGB (ADC dataset loader reads 'L' then converts to 'RGB' itself)
     img.save(img_out)
     mask.save(mask_out)
 
