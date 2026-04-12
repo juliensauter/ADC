@@ -97,21 +97,13 @@ def run_cmd(cmd: list[str], description: str, dry_run: bool = False) -> bool:
 
 
 def install_dependencies(dry_run: bool = False, eval_deps: bool = True):
-    """Install Python packages via uv."""
+    """Check Python dependencies (installed automatically by `uv run` via pyproject.toml)."""
     print("\n" + "="*60)
-    print("  STEP 1: Installing Python dependencies")
+    print("  STEP 1: Python dependencies")
     print("="*60)
-
-    # Check if uv is available
-    uv_path = shutil.which("uv")
-    if uv_path is None:
-        print("  ⚠ 'uv' not found. Falling back to pip.")
-        pip_cmd = [sys.executable, "-m", "pip", "install"]
-    else:
-        pip_cmd = ["uv", "pip", "install"]
-
-    deps = CORE_DEPS + (EVAL_DEPS if eval_deps else [])
-    run_cmd(pip_cmd + deps, "Installing core + evaluation packages", dry_run)
+    print("  Dependencies are managed via pyproject.toml.")
+    print("  When using `uv run python setup_adc.py`, they are installed automatically.")
+    print("  If running without uv, install manually: pip install -r requirements.txt")
 
 
 def download_sd15(dry_run: bool = False):

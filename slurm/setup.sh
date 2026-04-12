@@ -11,7 +11,7 @@
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=julien.sauter@haw-landshut.de
+#SBATCH --mail-user=s-jsaute@haw-landshut.de
 set -euo pipefail
 cd "$HOME/ADC"
 
@@ -21,8 +21,6 @@ if ! command -v uv &>/dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-uv venv .venv
-source .venv/bin/activate
-python setup_adc.py "$@"
+uv run python setup_adc.py "$@"
 
 echo "Setup done. Next: sbatch slurm/train.sh"

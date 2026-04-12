@@ -138,6 +138,29 @@ print(f"\nDataset: {len(dataset)} samples, batch_size={BATCH_SIZE}, "
 # Callbacks & Logger
 # ──────────────────────────────────────────────────────────────────────────────
 logger_cb = ImageLogger(batch_frequency=LOGGER_FREQ)
+ckpt_cb = pl.callbacks.ModelCheckpoint(
+    every_n_train_steps=LOGGER_FREQ,   # save at same frequency as image logging
+    save_last=True,                # always keep last.ckpt (even if killed mid-epoch)
+    save_top_k=-1,                 # keep all checkpoints (don't delete old ones)
+)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sanity check: run 2 steps + 1 image log to verify setup, then continue
+# ──────────────────────────────────────────────────────────────────────────────
+print("\n── Sanity check: 2 training steps + image generation ──")
+sanity_logger = ImageLogger(batch_frequency=1, log_first_step=True)
+sanity_trainer = pl.Trainer(
+    accelerator=ACCELERATOR,
+    devices=DEVICES,
+    callbacks=[sanity_logger],
+    max_steps=2,
+    accumulate_grad_batches=GRAD_ACCUM,
+    precision=PRECISION,
+    log_every_n_steps=1,
+    enable_checkpointing=False,
+)
+sanity_trainer.fit(model, dataloader)
+print("── Sanity check passed ✓ ──\n")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Trainer
@@ -145,13 +168,13 @@ logger_cb = ImageLogger(batch_frequency=LOGGER_FREQ)
 trainer = pl.Trainer(
     accelerator=ACCELERATOR,
     devices=DEVICES,
-    callbacks=[logger_cb],
+    callbacks=[logger_cb, ckpt_cb],
     max_steps=MAX_STEPS,
     accumulate_grad_batches=GRAD_ACCUM,
     precision=PRECISION,
     # Logging
     log_every_n_steps=50,
-    # Checkpointing: saves every 500 steps
+    # Checkpointing: saves every epoch (~400 steps)
     enable_checkpointing=True,
 )
 

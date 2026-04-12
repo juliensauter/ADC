@@ -11,14 +11,13 @@
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=julien.sauter@haw-landshut.de
+#SBATCH --mail-user=s-jsaute@haw-landshut.de
 set -euo pipefail
 cd "$HOME/ADC"
-source .venv/bin/activate
 
 echo "Job $SLURM_JOB_ID on $(hostname) — $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 echo "Starting training at $(date)"
 
-TRAINING_TARGET=dgx_single python tutorial_train_single_gpu.py
+TRAINING_TARGET=dgx_single uv run python tutorial_train_single_gpu.py
 
 echo "Done at $(date). Checkpoints: lightning_logs/"

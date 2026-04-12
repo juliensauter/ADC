@@ -7,7 +7,7 @@ import albumentations
 
 
 class MyDataset(Dataset):
-    def __init__(self, root='./data/train/prompt.json'):
+    def __init__(self, root='./data/test/prompt.json'):
         self.data = []
         with open(root, 'rt') as f:
             for line in f:

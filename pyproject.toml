@@ -1,0 +1,23 @@
+[project]
+name = "adc"
+version = "0.1.0"
+description = "Adaptively Distilled ControlNet — liver laparoscopic image synthesis"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "pytorch-lightning",
+    "einops",
+    "omegaconf",
+    "albumentations",
+    "transformers",
+    "safetensors",
+    "open-clip-torch",
+    "kornia",
+    "scipy",
+    "opencv-python",
+    "scikit-learn",
+    "huggingface-hub",
+    "torchmetrics[image]",
+    "lpips",
+]
