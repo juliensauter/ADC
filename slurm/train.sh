@@ -1,7 +1,7 @@
 #!/bin/bash
 # Train ADC on liver data. Requires setup.sh to have been run first.
 # Usage: sbatch slurm/train.sh
-#SBATCH --partition=dgx_01
+#SBATCH --partition=workstations
 #SBATCH --qos=students_qos
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -18,6 +18,6 @@ cd "$HOME/ADC"
 echo "Job $SLURM_JOB_ID on $(hostname) — $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 echo "Starting training at $(date)"
 
-TRAINING_TARGET=dgx_single uv run python tutorial_train_single_gpu.py
+TRAINING_TARGET=workstation uv run python tutorial_train_single_gpu.py
 
 echo "Done at $(date). Checkpoints: lightning_logs/"

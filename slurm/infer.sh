@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run inference with a trained checkpoint.
 # Usage: CKPT_PATH=./lightning_logs/.../last.ckpt sbatch slurm/infer.sh
-#SBATCH --partition=dgx_01
+#SBATCH --partition=workstations
 #SBATCH --qos=students_qos
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4

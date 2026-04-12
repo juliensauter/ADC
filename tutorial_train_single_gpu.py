@@ -110,9 +110,24 @@ elif TRAINING_TARGET == "dgx_multi":
     NUM_WORKERS  = 4
     print(f"\n[DGX multi] {DEVICES} CUDA GPUs")
 
+elif TRAINING_TARGET == "workstation":
+    # Single-GPU workstation (unknown GPU — auto-detect bf16 support)
+    ACCELERATOR  = "gpu"
+    DEVICES      = 1
+    if torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8:
+        PRECISION = "bf16-mixed"   # Ampere+ (A100, RTX 30xx, RTX 40xx)
+    else:
+        PRECISION = "16-mixed"     # Older GPU (V100, RTX 20xx, etc.)
+    BATCH_SIZE   = 2               # Conservative: workstation GPUs may have ≤16GB VRAM
+    GRAD_ACCUM   = 2               # Effective batch = 2×2 = 4
+    NUM_WORKERS  = 4
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "(not found)"
+    print(f"\n[Workstation] CUDA GPU: {gpu_name}, precision={PRECISION}")
+
 else:
     raise ValueError(f"Unknown TRAINING_TARGET: {TRAINING_TARGET!r}. "
-                     "Choose 'mps', 'dgx_single', or 'dgx_multi'")
+                     "Choose 'mps', 'dgx_single', 'dgx_multi', or 'workstation'")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Model
