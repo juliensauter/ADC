@@ -1,6 +1,5 @@
 # pytorch_diffusion + derived encoder decoder
 import math
-from turtle import distance
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

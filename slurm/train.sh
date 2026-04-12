@@ -13,6 +13,7 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=s-jsaute@haw-landshut.de
 set -euo pipefail
+export PYTHONUNBUFFERED=1
 cd "$HOME/ADC"
 
 echo "Job $SLURM_JOB_ID on $(hostname) — $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
