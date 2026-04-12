@@ -2,7 +2,7 @@
 # One-time setup: install deps, download weights, create control checkpoint.
 # Usage: sbatch slurm/setup.sh
 #SBATCH --partition=dgx_01
-#SBATCH --qos=research_qos
+#SBATCH --qos=students_qos
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G

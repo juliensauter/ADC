@@ -2,7 +2,7 @@
 # Train ADC on liver data. Requires setup.sh to have been run first.
 # Usage: sbatch slurm/train.sh
 #SBATCH --partition=dgx_01
-#SBATCH --qos=research_qos
+#SBATCH --qos=students_qos
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
