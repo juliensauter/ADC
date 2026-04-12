@@ -57,6 +57,7 @@ CKPT_PATH    = './stable-diffusion-v1-5/control_sd15.ckpt'   # fresh start from 
 # CKPT_PATH  = './adc_weights/merged_pytorch_model.pth'        # start from ADC polyp weights (transfer)
 # NOTE: When using ADC polyp weights for transfer learning, also set STRICT_LOAD = False below.
 RESUME_PATH  = None          # Set to .ckpt path to resume, else None
+                             # Auto-detected below if lightning_logs/*/checkpoints/last.ckpt exists
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Data config — set DATA_ROOT to your prepared liver data folder
@@ -67,7 +68,7 @@ DATA_ROOT    = './data/train/prompt.json'   # train split (default for prepare_l
 
 LOGGER_FREQ  = 400
 LR           = 1e-5
-MAX_STEPS    = 3000          # 1000 for quick domain tests, 3000 for full training
+MAX_STEPS    = int(os.environ.get('MAX_STEPS', '20000'))  # env override: MAX_STEPS=50000 uv run ...
 SD_LOCKED    = True          # True = only train ControlNets (saves memory, avoids forgetting)
                              # False = also fine-tune SD UNet decoder (risk of forgetting on <2k images)
 ONLY_MID_CTRL = False
@@ -160,22 +161,35 @@ ckpt_cb = pl.callbacks.ModelCheckpoint(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Sanity check: run 2 steps + 1 image log to verify setup, then continue
+# Auto-resume: find latest last.ckpt if RESUME_PATH not explicitly set
 # ──────────────────────────────────────────────────────────────────────────────
-print("\n── Sanity check: 2 training steps + image generation ──")
-sanity_logger = ImageLogger(batch_frequency=1, log_first_step=True)
-sanity_trainer = pl.Trainer(
-    accelerator=ACCELERATOR,
-    devices=DEVICES,
-    callbacks=[sanity_logger],
-    max_steps=2,
-    accumulate_grad_batches=GRAD_ACCUM,
-    precision=PRECISION,
-    log_every_n_steps=1,
-    enable_checkpointing=False,
-)
-sanity_trainer.fit(model, dataloader)
-print("── Sanity check passed ✓ ──\n")
+import glob
+if RESUME_PATH is None:
+    candidates = sorted(glob.glob('lightning_logs/*/checkpoints/last.ckpt'))
+    if candidates:
+        RESUME_PATH = candidates[-1]
+        print(f"\nAuto-resume: found {RESUME_PATH}")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sanity check: run 2 steps + 1 image log to verify setup (skip on resume)
+# ──────────────────────────────────────────────────────────────────────────────
+if RESUME_PATH is None:
+    print("\n── Sanity check: 2 training steps + image generation ──")
+    sanity_logger = ImageLogger(batch_frequency=1, log_first_step=True)
+    sanity_trainer = pl.Trainer(
+        accelerator=ACCELERATOR,
+        devices=DEVICES,
+        callbacks=[sanity_logger],
+        max_steps=2,
+        accumulate_grad_batches=GRAD_ACCUM,
+        precision=PRECISION,
+        log_every_n_steps=1,
+        enable_checkpointing=False,
+    )
+    sanity_trainer.fit(model, dataloader)
+    print("── Sanity check passed ✓ ──\n")
+else:
+    print(f"\nSkipping sanity check (resuming from checkpoint)")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Trainer
