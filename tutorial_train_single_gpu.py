@@ -155,9 +155,9 @@ print(f"\nDataset: {len(dataset)} samples, batch_size={BATCH_SIZE}, "
 # ──────────────────────────────────────────────────────────────────────────────
 logger_cb = ImageLogger(batch_frequency=LOGGER_FREQ)
 ckpt_cb = pl.callbacks.ModelCheckpoint(
-    every_n_train_steps=LOGGER_FREQ,   # save at same frequency as image logging
+    every_n_train_steps=LOGGER_FREQ * 5,   # save every 2000 steps (5× image log freq)
     save_last=True,                # always keep last.ckpt (even if killed mid-epoch)
-    save_top_k=-1,                 # keep all checkpoints (don't delete old ones)
+    save_top_k=1,                  # keep latest periodic ckpt + last.ckpt (~18 GB total)
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
