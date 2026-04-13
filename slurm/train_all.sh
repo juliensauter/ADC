@@ -10,11 +10,13 @@
 #   PRESET=polyp_transfer sbatch slurm/train.sh
 set -euo pipefail
 
-# Default preset sequence (order matters — cheapest experiment first)
+# Default preset sequence:
+#   Phase 1 base presets → Phase 1 chain presets → Phase 2
+# Chain presets depend on their source preset's checkpoint, so ordering matters.
 if [[ $# -gt 0 ]]; then
     PRESETS=("$@")
 else
-    PRESETS=(scratch polyp_transfer polyp_unlocked)
+    PRESETS=(scratch polyp_transfer scratch_unlocked polyp_unlocked polyp_stage2)
 fi
 
 echo "=== ADC train_all: submitting ${#PRESETS[@]} presets as dependency chain ==="

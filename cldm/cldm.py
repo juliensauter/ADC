@@ -480,14 +480,35 @@ class ControlLDM(LatentDiffusion):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = list(self.control_model.parameters())
-        params += list(self.image_control_model.parameters())
+        train_image_cn = getattr(self, 'train_image_cn', True)
+        unlock_last_n  = getattr(self, 'unlock_last_n', 0)
+        decoder_lr_scale = getattr(self, 'decoder_lr_scale', 0.1)
+
+        param_groups = [
+            {"params": list(self.control_model.parameters()), "lr": lr},
+        ]
+
+        # Only include image ControlNet when it will receive gradients
+        if train_image_cn:
+            param_groups.append(
+                {"params": list(self.image_control_model.parameters()), "lr": lr}
+            )
+
         if not self.sd_locked:
-            params += list(self.model.diffusion_model.output_blocks.parameters())
-            params += list(self.model.diffusion_model.out.parameters())
-            params += list(self.model.diffusion_model.image_output_blocks.parameters())
-            params += list(self.model.diffusion_model.image_out.parameters())
-        opt = torch.optim.AdamW(params, lr=lr)
+            # Partial unfreezing: only last N decoder blocks (+ final convs)
+            n_total = len(self.model.diffusion_model.output_blocks)
+            n_unlock = unlock_last_n if unlock_last_n > 0 else n_total
+            decoder_params = []
+            for i in range(n_total - n_unlock, n_total):
+                decoder_params += list(self.model.diffusion_model.output_blocks[i].parameters())
+                decoder_params += list(self.model.diffusion_model.image_output_blocks[i].parameters())
+            decoder_params += list(self.model.diffusion_model.out.parameters())
+            decoder_params += list(self.model.diffusion_model.image_out.parameters())
+            param_groups.append(
+                {"params": decoder_params, "lr": lr * decoder_lr_scale, "weight_decay": 0.0}
+            )
+
+        opt = torch.optim.AdamW(param_groups)
         return opt
 
     def low_vram_shift(self, is_diffusing):
@@ -513,16 +534,14 @@ class ControlLDM(LatentDiffusion):
 
         weights_ones = torch.ones_like(t).to(x_start.device)
 
-        # ADC staged training weights:
-        #   Phase 1: weights_mask=1, weights_image=0 → train mask ControlNet only
-        #   Phase 2: set weights_image>0 to activate image ControlNet training
-        # NOTE: with weights_image=0, image_control_model gets no gradient from
-        # loss but IS in the optimizer. AdamW weight decay will slowly shrink its
-        # weights. For liver training, consider enabling weights_image after the
-        # mask branch has converged (e.g. after 1000+ steps).
-        weights_mask = 1.0 * weights_ones  # Loss 0
-        weights_image = 0.0 * weights_ones  # Loss 1
-        weights_mask_2_image = 0.0 * weights_ones  # Loss 2
+        # Loss weights — set via model attributes from training script presets
+        w_mask  = getattr(self, 'loss_weight_mask', 1.0)
+        w_image = getattr(self, 'loss_weight_image', 0.0)
+        w_dist  = getattr(self, 'loss_weight_distill', 0.0)
+
+        weights_mask = w_mask * weights_ones             # Loss 0: mask decoder denoising
+        weights_image = w_image * weights_ones            # Loss 1: image decoder denoising
+        weights_mask_2_image = w_dist * weights_ones      # Loss 2: anatomy-aware distillation
 
         B, C, H, W = x_start.shape
         weights = cond["c_concat_mask"][0]
