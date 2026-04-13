@@ -21,18 +21,50 @@ set -euo pipefail
 export PYTHONUNBUFFERED=1
 cd "$HOME/ADC"
 
+START_TIME=$(date)
+EXIT_CODE=0
+
 # ── Preset selection ──
 export PRESET=${PRESET:-all}
 
 echo "Job $SLURM_JOB_ID on $(hostname) — $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
-echo "Preset: $PRESET  |  Starting at $(date)"
+echo "Preset: $PRESET  |  Starting at $START_TIME"
 
 if [[ "$PRESET" == "all" ]]; then
-    # Run all presets sequentially — autodetects completion, skips done presets
-    TRAINING_TARGET=workstation uv run python run_all.py
+    TRAINING_TARGET=workstation uv run python run_all.py || EXIT_CODE=$?
 else
-    # Run a single preset
-    TRAINING_TARGET=workstation uv run python tutorial_train_single_gpu.py
+    TRAINING_TARGET=workstation uv run python tutorial_train_single_gpu.py || EXIT_CODE=$?
 fi
 
-echo "Done at $(date). Preset: $PRESET  |  Output: runs/"
+# ── Job summary (appears in .out file and SLURM email) ──
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "  JOB SUMMARY — $SLURM_JOB_ID"
+echo "═══════════════════════════════════════════════════════════"
+echo "  Node:     $(hostname)"
+echo "  GPU:      $(nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader 2>/dev/null || echo 'unavailable')"
+echo "  Started:  $START_TIME"
+echo "  Finished: $(date)"
+echo "  Exit:     $EXIT_CODE"
+echo ""
+
+# Show disk usage per preset
+echo "  Disk usage:"
+for d in runs/*/; do
+    if [[ -d "$d" ]]; then
+        size=$(du -sh "$d" 2>/dev/null | cut -f1)
+        ckpts=$(find "$d" -name "*.ckpt" 2>/dev/null | wc -l | tr -d ' ')
+        imgs=$(find "$d" -path "*/image_log/train/*.png" 2>/dev/null | wc -l | tr -d ' ')
+        echo "    $(basename "$d"): ${size} (${ckpts} ckpts, ${imgs} images)"
+    fi
+done
+echo ""
+
+# Show training report summary if available
+if [[ -f runs/training_report.md ]]; then
+    echo "  Training report (first 25 lines):"
+    head -25 runs/training_report.md | sed 's/^/    /'
+fi
+
+echo "═══════════════════════════════════════════════════════════"
+exit $EXIT_CODE
