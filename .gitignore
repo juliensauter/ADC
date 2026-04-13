@@ -25,3 +25,7 @@ data/val/
 data/test/
 data/prompt.json
 papers/adc_paper.txt
+
+# SLURM output logs
+adc_*.out
+adc_*.err
