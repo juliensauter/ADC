@@ -1,26 +1,32 @@
 """
 tutorial_train_single_gpu.py
 ============================
-Training script for ADC. Works on Apple Silicon MPS (local) and a DGX CUDA cluster.
+Training script for ADC with two env-var switches:
 
-ONE-LINE SWITCH:
-    For local MPS testing:  TRAINING_TARGET = "mps"
-    For DGX single GPU:     TRAINING_TARGET = "dgx_single"
-    For DGX multi-GPU:      TRAINING_TARGET = "dgx_multi"   # uses all visible GPUs
+  TRAINING_TARGET  — hardware target (mps | workstation | dgx_single | dgx_multi)
+  PRESET           — training config  (scratch | polyp_transfer | polyp_unlocked)
 
 Usage:
+    # Local (MPS):
     uv run python tutorial_train_single_gpu.py
+
+    # Cluster single preset:
+    TRAINING_TARGET=workstation PRESET=polyp_transfer uv run python tutorial_train_single_gpu.py
+
+    # Cluster via SLURM (single):
+    PRESET=polyp_transfer sbatch slurm/train.sh
+
+    # Cluster via SLURM (all presets chained):
+    bash slurm/train_all.sh
+
+Each preset stores output in runs/{preset_name}/ (checkpoints, images, metrics).
+Auto-resumes from last.ckpt if found.  Override with RESUME_PATH env var.
 
 Key differences vs original tutorial_train.py:
   - DeepSpeed removed → standard Lightning training
-  - Single config variable TRAINING_TARGET controls everything
   - Gradient accumulation for simulating larger batch size on limited VRAM
   - Float32 enforced automatically for MPS
-  - No zero_to_fp32.py or tool_merge_control.py needed after training —
-    Lightning checkpoints are directly loadable with load_state_dict()
-
-Resume training:
-    Set RESUME_PATH to a .ckpt path, or None to start fresh.
+  - Lightning checkpoints are directly loadable with load_state_dict()
 """
 
 import os
@@ -40,10 +46,59 @@ from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ★ ONE-LINE SWITCH — change this to adapt to your hardware
-#   Can also be set via env var: TRAINING_TARGET=dgx_single uv run python ...
+# ★ TWO SWITCHES — hardware target + training preset
+#   Set via env vars:   TRAINING_TARGET=workstation PRESET=polyp_transfer uv run python ...
+#   Or edit defaults below.
 # ──────────────────────────────────────────────────────────────────────────────
-TRAINING_TARGET = os.environ.get("TRAINING_TARGET", "mps")  # "mps" | "dgx_single" | "dgx_multi"
+TRAINING_TARGET = os.environ.get("TRAINING_TARGET", "mps")  # "mps" | "dgx_single" | "dgx_multi" | "workstation"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ★ TRAINING PRESETS — all config in one place for easy switching
+#   Each preset defines: starting checkpoint, weights locking, learning rate, etc.
+#   PRESET=scratch           → train ControlNets from SD v1.5 (baseline)
+#   PRESET=polyp_transfer    → transfer from ADC polyp weights (closer domain)
+#   PRESET=polyp_unlocked    → polyp transfer + unlock SD UNet decoder
+# ──────────────────────────────────────────────────────────────────────────────
+PRESETS = {
+    "scratch": {
+        "ckpt_path": "./stable-diffusion-v1-5/control_sd15.ckpt",
+        "strict_load": True,
+        "sd_locked": True,         # only train ControlNets
+        "lr": 1e-5,
+        "max_steps": 20000,
+        "desc": "SD v1.5 base → liver ControlNets from scratch",
+    },
+    "polyp_transfer": {
+        "ckpt_path": "./adc_weights/merged_pytorch_model.pth",
+        "strict_load": False,      # ADC polyp ckpt has different key names
+        "sd_locked": True,         # only train ControlNets
+        "lr": 1e-5,
+        "max_steps": 20000,
+        "desc": "ADC polyp weights → liver (closer medical domain)",
+    },
+    "polyp_unlocked": {
+        "ckpt_path": "./adc_weights/merged_pytorch_model.pth",
+        "strict_load": False,
+        "sd_locked": False,        # also fine-tune SD UNet decoder (deeper adaptation)
+        "lr": 5e-6,                # lower LR when training more params (avoids catastrophic forgetting)
+        "max_steps": 10000,
+        "desc": "ADC polyp + unlocked UNet decoder (risk: forgetting on <2k images)",
+    },
+}
+
+PRESET_NAME = os.environ.get("PRESET", "scratch")
+assert PRESET_NAME in PRESETS, f"Unknown PRESET={PRESET_NAME!r}. Options: {list(PRESETS.keys())}"
+preset = PRESETS[PRESET_NAME]
+
+CKPT_PATH    = preset["ckpt_path"]
+STRICT_LOAD  = preset["strict_load"]
+SD_LOCKED    = preset["sd_locked"]
+LR           = preset["lr"]
+MAX_STEPS    = int(os.environ.get('MAX_STEPS', str(preset["max_steps"])))
+RESUME_PATH  = os.environ.get("RESUME_PATH", None)     # explicit override, else auto-detected
+                                                        # Auto-detected below if runs/{preset}/checkpoints/last.ckpt exists
+LOG_DIR      = f"runs/{PRESET_NAME}"                    # separate output dir per preset
+ONLY_MID_CTRL = False
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Reproducibility
@@ -51,28 +106,19 @@ TRAINING_TARGET = os.environ.get("TRAINING_TARGET", "mps")  # "mps" | "dgx_singl
 pl.seed_everything(42, workers=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Shared training config (same for all targets)
-# ──────────────────────────────────────────────────────────────────────────────
-CKPT_PATH    = './stable-diffusion-v1-5/control_sd15.ckpt'   # fresh start from SD v1.5
-# CKPT_PATH  = './adc_weights/merged_pytorch_model.pth'        # start from ADC polyp weights (transfer)
-# NOTE: When using ADC polyp weights for transfer learning, also set STRICT_LOAD = False below.
-RESUME_PATH  = None          # Set to .ckpt path to resume, else None
-                             # Auto-detected below if lightning_logs/*/checkpoints/last.ckpt exists
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Data config — set DATA_ROOT to your prepared liver data folder
 # Run: uv run python prepare_liver_data.py --src /path/to/raw --out ./data
 # ──────────────────────────────────────────────────────────────────────────────
-DATA_ROOT    = './data/train/prompt.json'   # train split (default for prepare_liver_data.py)
-# DATA_ROOT  = './data/prompt.json'          # combined (⚠ includes test — only for quick demos)
-
+DATA_ROOT    = './data/train/prompt.json'   # train split
 LOGGER_FREQ  = 400
-LR           = 1e-5
-MAX_STEPS    = int(os.environ.get('MAX_STEPS', '20000'))  # env override: MAX_STEPS=50000 uv run ...
-SD_LOCKED    = True          # True = only train ControlNets (saves memory, avoids forgetting)
-                             # False = also fine-tune SD UNet decoder (risk of forgetting on <2k images)
-ONLY_MID_CTRL = False
-STRICT_LOAD  = True          # False when loading ADC polyp weights (key mismatch ok)
+
+print(f"\n{'='*60}")
+print(f"  PRESET: {PRESET_NAME}")
+print(f"  {preset['desc']}")
+print(f"  ckpt:      {CKPT_PATH}")
+print(f"  sd_locked: {SD_LOCKED}  |  lr: {LR}  |  max_steps: {MAX_STEPS}")
+print(f"  log_dir:   {LOG_DIR}")
+print(f"{'='*60}")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Hardware-specific settings derived from TRAINING_TARGET
@@ -161,11 +207,14 @@ ckpt_cb = pl.callbacks.ModelCheckpoint(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Auto-resume: find latest last.ckpt if RESUME_PATH not explicitly set
+# Auto-resume: find latest last.ckpt in this preset's log dir
 # ──────────────────────────────────────────────────────────────────────────────
 import glob
 if RESUME_PATH is None:
-    candidates = sorted(glob.glob('lightning_logs/*/checkpoints/last.ckpt'))
+    candidates = sorted(glob.glob(f'{LOG_DIR}/*/checkpoints/last.ckpt'))
+    # Legacy path: old runs wrote to lightning_logs/ — only match for scratch preset
+    if not candidates and PRESET_NAME == "scratch":
+        candidates = sorted(glob.glob('lightning_logs/*/checkpoints/last.ckpt'))
     if candidates:
         RESUME_PATH = candidates[-1]
         print(f"\nAuto-resume: found {RESUME_PATH}")
@@ -176,9 +225,11 @@ if RESUME_PATH is None:
 if RESUME_PATH is None:
     print("\n── Sanity check: 2 training steps + image generation ──")
     sanity_logger = ImageLogger(batch_frequency=1, log_first_step=True)
+    sanity_csv = pl.loggers.CSVLogger(save_dir=LOG_DIR, name="sanity")
     sanity_trainer = pl.Trainer(
         accelerator=ACCELERATOR,
         devices=DEVICES,
+        logger=sanity_csv,
         callbacks=[sanity_logger],
         max_steps=2,
         accumulate_grad_batches=GRAD_ACCUM,
@@ -194,16 +245,17 @@ else:
 # ──────────────────────────────────────────────────────────────────────────────
 # Trainer
 # ──────────────────────────────────────────────────────────────────────────────
+csv_logger = pl.loggers.CSVLogger(save_dir=LOG_DIR, name="")
+
 trainer = pl.Trainer(
     accelerator=ACCELERATOR,
     devices=DEVICES,
+    logger=csv_logger,
     callbacks=[logger_cb, ckpt_cb],
     max_steps=MAX_STEPS,
     accumulate_grad_batches=GRAD_ACCUM,
     precision=PRECISION,
-    # Logging
     log_every_n_steps=50,
-    # Checkpointing: saves every epoch (~400 steps)
     enable_checkpointing=True,
 )
 
@@ -217,6 +269,7 @@ else:
     print(f"\nStarting training from: {CKPT_PATH}")
     trainer.fit(model, dataloader)
 
-print("\nTraining complete.")
-print("Checkpoints saved in: lightning_logs/version_N/checkpoints/")
-print("Load checkpoint with: model.load_state_dict(load_state_dict('path/to/epoch-step.ckpt'))")
+print(f"\nTraining complete.  [preset={PRESET_NAME}]")
+print(f"Checkpoints saved in: {LOG_DIR}/")
+print(f"Load checkpoint with: model.load_state_dict(load_state_dict('{LOG_DIR}/.../last.ckpt'))")
+print(f"Images saved in:      {LOG_DIR}/image_log/")

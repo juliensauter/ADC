@@ -6,6 +6,7 @@ stable-diffusion-v1-5/
 generated_results/
 image_log/
 lightning_logs/
+runs/
 
 # Python cache
 __pycache__/
