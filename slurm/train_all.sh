@@ -1,42 +1,50 @@
 #!/bin/bash
-# Submit all training presets as a SLURM dependency chain.
-# Each preset runs after the previous one finishes (afterany = run even if prior failed).
+# Submit ALL training presets as a single SLURM job.
+# Preferred method: runs all presets sequentially, autodetects completion.
 #
 # Usage:
-#   bash slurm/train_all.sh              # submit all 3 presets sequentially
-#   bash slurm/train_all.sh scratch polyp_transfer   # submit only selected presets
+#   bash slurm/train_all.sh              # submit all presets as one job
+#   bash slurm/train_all.sh --split      # submit as separate dependent jobs
 #
-# To submit a single preset directly:
-#   PRESET=polyp_transfer sbatch slurm/train.sh
+# The default (recommended) mode submits a single job that runs run_all.py,
+# which handles sequencing, completion detection, and post-training analysis.
+#
+# The --split mode submits separate SLURM jobs with dependency chaining
+# (each preset waits for the previous one to finish). Use this if you
+# need separate job tracking per preset.
 set -euo pipefail
 
-# Default preset sequence:
-#   Phase 1 base presets → Phase 1 chain presets → Phase 2
-# Chain presets depend on their source preset's checkpoint, so ordering matters.
-if [[ $# -gt 0 ]]; then
-    PRESETS=("$@")
-else
-    PRESETS=(scratch polyp_transfer scratch_unlocked polyp_unlocked polyp_stage2)
-fi
-
-echo "=== ADC train_all: submitting ${#PRESETS[@]} presets as dependency chain ==="
-echo "Presets: ${PRESETS[*]}"
-echo ""
-
-PREV_JOB=""
-
-for preset in "${PRESETS[@]}"; do
-    if [[ -z "$PREV_JOB" ]]; then
-        # First job — no dependency
-        JOB_ID=$(sbatch --parsable --export=ALL,PRESET="$preset" slurm/train.sh)
+if [[ "${1:-}" == "--split" ]]; then
+    shift
+    # Split mode: separate jobs with dependencies
+    if [[ $# -gt 0 ]]; then
+        PRESETS=("$@")
     else
-        # Chain: run after previous job finishes (regardless of exit code)
-        JOB_ID=$(sbatch --parsable --dependency=afterany:"$PREV_JOB" --export=ALL,PRESET="$preset" slurm/train.sh)
+        PRESETS=(scratch polyp_transfer scratch_unlocked polyp_unlocked polyp_stage2 scratch_stage2 polyp_stage2_from_unlocked)
     fi
-    echo "  Submitted preset=$preset → Job $JOB_ID${PREV_JOB:+ (after $PREV_JOB)}"
-    PREV_JOB="$JOB_ID"
-done
 
-echo ""
-echo "All jobs submitted. Monitor with:  squeue -u \$USER"
-echo "Cancel chain with:                 scancel $PREV_JOB  (cancels last; earlier jobs still run)"
+    echo "=== ADC train_all (split mode): submitting ${#PRESETS[@]} presets ==="
+    echo "Presets: ${PRESETS[*]}"
+    echo ""
+
+    PREV_JOB=""
+    for preset in "${PRESETS[@]}"; do
+        if [[ -z "$PREV_JOB" ]]; then
+            JOB_ID=$(sbatch --parsable --export=ALL,PRESET="$preset" slurm/train.sh)
+        else
+            JOB_ID=$(sbatch --parsable --dependency=afterany:"$PREV_JOB" --export=ALL,PRESET="$preset" slurm/train.sh)
+        fi
+        echo "  Submitted preset=$preset → Job $JOB_ID${PREV_JOB:+ (after $PREV_JOB)}"
+        PREV_JOB="$JOB_ID"
+    done
+
+    echo ""
+    echo "All jobs submitted. Monitor with:  squeue -u \$USER"
+else
+    # Default: single job running all presets
+    echo "=== ADC train_all: submitting single job for all presets ==="
+    JOB_ID=$(sbatch --parsable --export=ALL,PRESET=all slurm/train.sh)
+    echo "  Submitted job $JOB_ID — runs all presets sequentially"
+    echo "  Monitor with:  squeue -u \$USER"
+    echo "  Output:        adc_train_${JOB_ID}.out"
+fi

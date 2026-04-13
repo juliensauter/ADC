@@ -5,7 +5,8 @@ Training script for ADC with two env-var switches:
 
   TRAINING_TARGET  — hardware target (mps | workstation | dgx_single | dgx_multi)
   PRESET           — training config  (scratch | polyp_transfer | scratch_unlocked |
-                                       polyp_unlocked | polyp_stage2)
+                                       polyp_unlocked | polyp_stage2 | scratch_stage2 |
+                                       polyp_stage2_from_unlocked)
 
 Usage:
     # Local (MPS):
@@ -39,12 +40,35 @@ sys.path.insert(0, ".")
 
 from share import *
 
+import glob
 import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from tutorial_dataset import MyDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
+
+
+def find_source_checkpoint(source_preset: str) -> str:
+    """Find the latest last.ckpt for a source preset.
+
+    Searches (in priority order):
+      1. runs/{source_preset}/*/checkpoints/last.ckpt   (new preset system)
+      2. lightning_logs/*/checkpoints/last.ckpt          (legacy, scratch only)
+
+    Returns the path to the checkpoint, or raises FileNotFoundError.
+    """
+    candidates = sorted(glob.glob(f'runs/{source_preset}/*/checkpoints/last.ckpt'))
+    if not candidates and source_preset == "scratch":
+        candidates = sorted(glob.glob('lightning_logs/*/checkpoints/last.ckpt'))
+    if not candidates:
+        raise FileNotFoundError(
+            f"No checkpoint found for source preset '{source_preset}'.\n"
+            f"  Searched: runs/{source_preset}/*/checkpoints/last.ckpt\n"
+            f"  Has '{source_preset}' been trained? Run it first."
+        )
+    return candidates[-1]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ★ TWO SWITCHES — hardware target + training preset
@@ -61,6 +85,12 @@ TRAINING_TARGET = os.environ.get("TRAINING_TARGET", "mps")  # "mps" | "dgx_singl
 #   PRESET=scratch_unlocked  → continue scratch + unlock last 3 decoder blocks
 #   PRESET=polyp_unlocked    → continue polyp_transfer + unlock last 3 decoder blocks
 #   PRESET=polyp_stage2      → full ADC Phase 2: image CN + distillation + decoder
+#   PRESET=scratch_stage2    → Phase 2 from scratch path
+#   PRESET=polyp_stage2_from_unlocked → Phase 2 from polyp progressive unfreezing
+#
+# Chain presets use "$source_preset" as ckpt_path — resolved at runtime via
+# find_source_checkpoint().  This auto-finds the latest checkpoint regardless
+# of whether it's in runs/ or legacy lightning_logs/.
 # ──────────────────────────────────────────────────────────────────────────────
 PRESETS = {
     "scratch": {
@@ -90,7 +120,7 @@ PRESETS = {
         "desc": "ADC polyp weights → liver (closer medical domain)",
     },
     "scratch_unlocked": {
-        "ckpt_path": "runs/scratch/version_0/checkpoints/last.ckpt",
+        "ckpt_path": "$scratch",           # auto-resolved via find_source_checkpoint()
         "strict_load": False,      # Lightning ckpt format
         "sd_locked": False,        # unlock decoder
         "unlock_last_n": 3,        # only last 3 blocks (37.6M params, fine texture)
@@ -103,7 +133,7 @@ PRESETS = {
         "desc": "Scratch 20k → unlock last 3 decoder blocks (progressive unfreezing)",
     },
     "polyp_unlocked": {
-        "ckpt_path": "runs/polyp_transfer/version_0/checkpoints/last.ckpt",
+        "ckpt_path": "$polyp_transfer",    # auto-resolved
         "strict_load": False,
         "sd_locked": False,
         "unlock_last_n": 3,
@@ -116,7 +146,7 @@ PRESETS = {
         "desc": "Polyp transfer 20k → unlock last 3 decoder blocks",
     },
     "polyp_stage2": {
-        "ckpt_path": "runs/polyp_transfer/version_0/checkpoints/last.ckpt",
+        "ckpt_path": "$polyp_transfer",    # auto-resolved — Phase 2 directly from Phase 1
         "strict_load": False,
         "sd_locked": False,
         "unlock_last_n": 3,
@@ -128,13 +158,44 @@ PRESETS = {
         "max_steps": 10000,
         "desc": "Full ADC Phase 2: image CN + distillation + decoder unlock",
     },
+    "scratch_stage2": {
+        "ckpt_path": "$scratch_unlocked",  # auto-resolved — Phase 2 from unfrozen scratch
+        "strict_load": False,
+        "sd_locked": False,
+        "unlock_last_n": 3,
+        "train_image_cn": True,
+        "image_loss": 1.0,
+        "distill_loss": 0.5,
+        "decoder_lr_scale": 0.1,
+        "lr": 5e-6,
+        "max_steps": 10000,
+        "desc": "Scratch path Phase 2: image CN + distillation from unfrozen scratch",
+    },
+    "polyp_stage2_from_unlocked": {
+        "ckpt_path": "$polyp_unlocked",    # auto-resolved — Phase 2 from progressive unfreeze
+        "strict_load": False,
+        "sd_locked": False,
+        "unlock_last_n": 3,
+        "train_image_cn": True,
+        "image_loss": 1.0,
+        "distill_loss": 0.5,
+        "decoder_lr_scale": 0.1,
+        "lr": 5e-6,
+        "max_steps": 10000,
+        "desc": "Phase 2 from progressively unfrozen polyp weights",
+    },
 }
 
 PRESET_NAME = os.environ.get("PRESET", "scratch")
 assert PRESET_NAME in PRESETS, f"Unknown PRESET={PRESET_NAME!r}. Options: {list(PRESETS.keys())}"
 preset = PRESETS[PRESET_NAME]
 
-CKPT_PATH    = preset["ckpt_path"]
+# Resolve $source_preset markers → actual checkpoint paths
+CKPT_PATH = preset["ckpt_path"]
+if CKPT_PATH.startswith("$"):
+    source_preset = CKPT_PATH[1:]
+    CKPT_PATH = find_source_checkpoint(source_preset)
+    print(f"  Resolved ${source_preset} → {CKPT_PATH}")
 STRICT_LOAD  = preset["strict_load"]
 SD_LOCKED    = preset["sd_locked"]
 LR           = preset["lr"]
@@ -269,10 +330,9 @@ ckpt_cb = pl.callbacks.ModelCheckpoint(
 # ──────────────────────────────────────────────────────────────────────────────
 # Auto-resume: find latest last.ckpt in this preset's log dir
 # ──────────────────────────────────────────────────────────────────────────────
-import glob
 if RESUME_PATH is None:
     candidates = sorted(glob.glob(f'{LOG_DIR}/*/checkpoints/last.ckpt'))
-    # Legacy path: old runs wrote to lightning_logs/ — only match for scratch preset
+    # Legacy path: old runs wrote to lightning_logs/ — only check for scratch preset
     if not candidates and PRESET_NAME == "scratch":
         candidates = sorted(glob.glob('lightning_logs/*/checkpoints/last.ckpt'))
     if candidates:

@@ -1,12 +1,17 @@
 #!/bin/bash
 # Train ADC on liver data. Requires setup.sh to have been run first.
-# Usage: sbatch slurm/train.sh
+#
+# Usage:
+#   PRESET=scratch sbatch slurm/train.sh          # single preset
+#   PRESET=all sbatch slurm/train.sh              # all presets, autodetect completion
+#   sbatch slurm/train.sh                         # default: all presets
+#
 #SBATCH --partition=workstations
 #SBATCH --qos=students_qos
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=24:00:00
+#SBATCH --time=72:00:00
 #SBATCH --job-name=adc_train
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -16,12 +21,18 @@ set -euo pipefail
 export PYTHONUNBUFFERED=1
 cd "$HOME/ADC"
 
-# ── Preset selection (override with:  PRESET=polyp_transfer sbatch slurm/train.sh) ──
-export PRESET=${PRESET:-scratch}
+# ── Preset selection ──
+export PRESET=${PRESET:-all}
 
 echo "Job $SLURM_JOB_ID on $(hostname) — $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
-echo "Preset: $PRESET  |  Starting training at $(date)"
+echo "Preset: $PRESET  |  Starting at $(date)"
 
-TRAINING_TARGET=workstation uv run python tutorial_train_single_gpu.py
+if [[ "$PRESET" == "all" ]]; then
+    # Run all presets sequentially — autodetects completion, skips done presets
+    TRAINING_TARGET=workstation uv run python run_all.py
+else
+    # Run a single preset
+    TRAINING_TARGET=workstation uv run python tutorial_train_single_gpu.py
+fi
 
-echo "Done at $(date). Preset: $PRESET  |  Checkpoints: runs/$PRESET/"
+echo "Done at $(date). Preset: $PRESET  |  Output: runs/"

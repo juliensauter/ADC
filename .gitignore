@@ -24,3 +24,4 @@ data/train/
 data/val/
 data/test/
 data/prompt.json
+papers/adc_paper.txt
