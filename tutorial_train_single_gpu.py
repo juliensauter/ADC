@@ -278,12 +278,18 @@ elif TRAINING_TARGET == "workstation":
         PRECISION = "bf16-mixed"   # Ampere+ (A100, RTX 30xx, RTX 40xx)
     else:
         PRECISION = "16-mixed"     # Older GPU (V100, RTX 20xx, etc.)
-    BATCH_SIZE   = 2               # Conservative: workstation GPUs may have ≤16GB VRAM
-    GRAD_ACCUM   = 2               # Effective batch = 2×2 = 4
+    # Phase 2 trains image CN (~363M extra params) → needs ~1.4GB more VRAM for optimizer
+    # states. Reduce batch to 1 and compensate with higher gradient accumulation.
+    if TRAIN_IMAGE_CN:
+        BATCH_SIZE = 1             # Phase 2: tight VRAM budget
+        GRAD_ACCUM = 4             # Effective batch = 1×4 = 4
+    else:
+        BATCH_SIZE = 2             # Phase 1/1b: fits comfortably
+        GRAD_ACCUM = 2             # Effective batch = 2×2 = 4
     NUM_WORKERS  = 4
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "(not found)"
-    print(f"\n[Workstation] CUDA GPU: {gpu_name}, precision={PRECISION}")
+    print(f"\n[Workstation] CUDA GPU: {gpu_name}, precision={PRECISION}, batch={BATCH_SIZE}")
 
 else:
     raise ValueError(f"Unknown TRAINING_TARGET: {TRAINING_TARGET!r}. "

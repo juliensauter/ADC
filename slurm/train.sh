@@ -19,6 +19,7 @@
 #SBATCH --mail-user=s-jsaute@haw-landshut.de
 set -euo pipefail
 export PYTHONUNBUFFERED=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 cd "$HOME/ADC"
 
 START_TIME=$(date)
