@@ -480,13 +480,18 @@ class ControlLDM(LatentDiffusion):
 
     def configure_optimizers(self):
         lr = self.learning_rate
+        train_mask_cn  = getattr(self, 'train_mask_cn', True)
         train_image_cn = getattr(self, 'train_image_cn', True)
         unlock_last_n  = getattr(self, 'unlock_last_n', 0)
         decoder_lr_scale = getattr(self, 'decoder_lr_scale', 0.1)
 
-        param_groups = [
-            {"params": list(self.control_model.parameters()), "lr": lr},
-        ]
+        param_groups = []
+
+        # Mask ControlNet — frozen in Phase 2 (acts as fixed teacher)
+        if train_mask_cn:
+            param_groups.append(
+                {"params": list(self.control_model.parameters()), "lr": lr}
+            )
 
         # Only include image ControlNet when it will receive gradients
         if train_image_cn:
@@ -501,9 +506,12 @@ class ControlLDM(LatentDiffusion):
             decoder_params = []
             for i in range(n_total - n_unlock, n_total):
                 decoder_params += list(self.model.diffusion_model.output_blocks[i].parameters())
-                decoder_params += list(self.model.diffusion_model.image_output_blocks[i].parameters())
+                # Only include image decoder blocks when image CN is being trained
+                if train_image_cn:
+                    decoder_params += list(self.model.diffusion_model.image_output_blocks[i].parameters())
             decoder_params += list(self.model.diffusion_model.out.parameters())
-            decoder_params += list(self.model.diffusion_model.image_out.parameters())
+            if train_image_cn:
+                decoder_params += list(self.model.diffusion_model.image_out.parameters())
             param_groups.append(
                 {"params": decoder_params, "lr": lr * decoder_lr_scale, "weight_decay": 0.0}
             )

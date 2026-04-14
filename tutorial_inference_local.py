@@ -63,7 +63,10 @@ BATCH_SIZE = 1
 # Pretrained ADC polyp weights (downloaded from HuggingFace SylarQ/ADC)
 # Override via env: CKPT_PATH=./lightning_logs/.../epoch=0-step=3000.ckpt uv run python ...
 import glob as _glob
-_trained = sorted(_glob.glob("lightning_logs/*/checkpoints/last.ckpt"))
+_trained = sorted(
+    _glob.glob("runs/*/*/checkpoints/last.ckpt") +
+    _glob.glob("lightning_logs/*/checkpoints/last.ckpt")
+)
 _default_ckpt = _trained[-1] if _trained else "./adc_weights/merged_pytorch_model.pth"
 CKPT_PATH = os.environ.get("CKPT_PATH", _default_ckpt)
 # For a fresh SD v1.5 init (before finetuning):

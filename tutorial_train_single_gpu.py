@@ -150,39 +150,42 @@ PRESETS = {
         "strict_load": False,
         "sd_locked": False,
         "unlock_last_n": 3,
+        "train_mask_cn": False,    # Phase 2: mask CN frozen (teacher)
         "train_image_cn": True,    # Phase 2: enable image ControlNet training
         "image_loss": 1.0,         # image decoder denoising loss
         "distill_loss": 0.5,       # anatomy-aware distillation (mask→image)
         "decoder_lr_scale": 0.1,
         "lr": 5e-6,
         "max_steps": 10000,
-        "desc": "Full ADC Phase 2: image CN + distillation + decoder unlock",
+        "desc": "Full ADC Phase 2: image CN + distillation (mask CN frozen as teacher)",
     },
     "scratch_stage2": {
         "ckpt_path": "$scratch_unlocked",  # auto-resolved — Phase 2 from unfrozen scratch
         "strict_load": False,
         "sd_locked": False,
         "unlock_last_n": 3,
+        "train_mask_cn": False,
         "train_image_cn": True,
         "image_loss": 1.0,
         "distill_loss": 0.5,
         "decoder_lr_scale": 0.1,
         "lr": 5e-6,
         "max_steps": 10000,
-        "desc": "Scratch path Phase 2: image CN + distillation from unfrozen scratch",
+        "desc": "Scratch path Phase 2: image CN + distillation (mask CN frozen)",
     },
     "polyp_stage2_from_unlocked": {
         "ckpt_path": "$polyp_unlocked",    # auto-resolved — Phase 2 from progressive unfreeze
         "strict_load": False,
         "sd_locked": False,
         "unlock_last_n": 3,
+        "train_mask_cn": False,
         "train_image_cn": True,
         "image_loss": 1.0,
         "distill_loss": 0.5,
         "decoder_lr_scale": 0.1,
         "lr": 5e-6,
         "max_steps": 10000,
-        "desc": "Phase 2 from progressively unfrozen polyp weights",
+        "desc": "Phase 2 from progressively unfrozen polyp weights (mask CN frozen)",
     },
 }
 
@@ -206,6 +209,7 @@ ONLY_MID_CTRL = False
 
 # New preset parameters for fine-grained control
 UNLOCK_LAST_N   = preset.get("unlock_last_n", 0)
+TRAIN_MASK_CN   = preset.get("train_mask_cn", True)
 TRAIN_IMAGE_CN  = preset.get("train_image_cn", True)
 IMAGE_LOSS      = preset.get("image_loss", 0.0)
 DISTILL_LOSS    = preset.get("distill_loss", 0.0)
@@ -228,8 +232,9 @@ print(f"  PRESET: {PRESET_NAME}")
 print(f"  {preset['desc']}")
 print(f"  ckpt:       {CKPT_PATH}")
 print(f"  sd_locked:  {SD_LOCKED}  |  unlock_last_n: {UNLOCK_LAST_N}")
+print(f"  mask_cn:    {TRAIN_MASK_CN}  |  image_cn: {TRAIN_IMAGE_CN}")
 print(f"  lr: {LR}  |  decoder_lr: {LR * DECODER_LR_SCALE}  |  max_steps: {MAX_STEPS}")
-print(f"  image_cn:   {TRAIN_IMAGE_CN}  |  image_loss: {IMAGE_LOSS}  |  distill: {DISTILL_LOSS}")
+print(f"  image_loss: {IMAGE_LOSS}  |  distill: {DISTILL_LOSS}")
 print(f"  log_dir:    {LOG_DIR}")
 print(f"{'='*60}")
 
@@ -307,7 +312,12 @@ model.only_mid_control = ONLY_MID_CTRL
 
 # Fine-grained training control (read by configure_optimizers / p_losses in cldm.py)
 model.unlock_last_n       = UNLOCK_LAST_N
+model.train_mask_cn       = TRAIN_MASK_CN
 model.train_image_cn      = TRAIN_IMAGE_CN
+
+# Freeze mask CN parameters entirely when not training (saves ~1.4GB gradient memory)
+if not TRAIN_MASK_CN:
+    model.control_model.requires_grad_(False)
 model.decoder_lr_scale    = DECODER_LR_SCALE
 model.loss_weight_mask    = 1.0
 model.loss_weight_image   = IMAGE_LOSS
