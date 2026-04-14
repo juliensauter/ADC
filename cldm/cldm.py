@@ -382,8 +382,10 @@ class ControlLDM(LatentDiffusion):
             control = [c * scale for c, scale in zip(control, self.control_scales)]
 
             if 'c_concat_image' in cond:
-                control_weights_mask = 1.0
-                control_weights_image = 0.25
+                # Control signal mixing weights — paper uses 1:1 (c_mix = c_mask + c_image)
+                # Configurable via model attributes set from training presets
+                control_weights_mask = getattr(self, 'control_weight_mask', 1.0)
+                control_weights_image = getattr(self, 'control_weight_image', 0.25)
                 control_image = self.image_control_model(x=x_noisy, hint=torch.cat(cond['c_concat_image'], 1), timesteps=t, context=cond_txt)
                 control_image = [c * scale for c, scale in zip(control_image, self.control_scales)]
                 control_image = [control_weights_mask * c_mask + control_weights_image * c_image for c_mask, c_image in zip(control, control_image)]
