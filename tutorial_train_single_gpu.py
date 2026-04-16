@@ -377,21 +377,14 @@ if __name__ == "__main__":
     model.train_mask_cn       = TRAIN_MASK_CN
     model.train_image_cn      = TRAIN_IMAGE_CN
 
-    # Freeze unused ControlNets entirely (saves gradient memory)
-    if not TRAIN_MASK_CN:
-        model.control_model.requires_grad_(False)
-    if not TRAIN_IMAGE_CN:
-        model.image_control_model.requires_grad_(False)
-
-    # When sd_locked=True, explicitly freeze decoder params to prevent
-    # gradient computation through decoder blocks (saves ~1-2 GB VRAM)
-    if SD_LOCKED:
-        for block in model.model.diffusion_model.output_blocks:
-            block.requires_grad_(False)
-        for block in model.model.diffusion_model.image_output_blocks:
-            block.requires_grad_(False)
-        model.model.diffusion_model.out.requires_grad_(False)
-        model.model.diffusion_model.image_out.requires_grad_(False)
+    # NOTE: We do NOT call requires_grad_(False) on any module (decoder or
+    # ControlNets) because the custom gradient checkpointing in
+    # ldm/modules/diffusionmodules/util.py uses torch.autograd.grad() which
+    # requires ALL parameters passed to checkpoint() to have requires_grad=True.
+    # Instead, unused modules are simply omitted from the optimizer in
+    # configure_optimizers() — gradients are computed but never applied.
+    # This costs a bit of extra memory for unused gradient buffers, but is the
+    # only safe approach with this checkpointing implementation.
 
     model.decoder_lr_scale    = DECODER_LR_SCALE
     model.loss_weight_mask    = 1.0
