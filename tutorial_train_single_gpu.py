@@ -377,14 +377,20 @@ if __name__ == "__main__":
     model.train_mask_cn       = TRAIN_MASK_CN
     model.train_image_cn      = TRAIN_IMAGE_CN
 
-    # NOTE: We do NOT call requires_grad_(False) on any module (decoder or
-    # ControlNets) because the custom gradient checkpointing in
-    # ldm/modules/diffusionmodules/util.py uses torch.autograd.grad() which
-    # requires ALL parameters passed to checkpoint() to have requires_grad=True.
-    # Instead, unused modules are simply omitted from the optimizer in
-    # configure_optimizers() — gradients are computed but never applied.
-    # This costs a bit of extra memory for unused gradient buffers, but is the
-    # only safe approach with this checkpointing implementation.
+    # Freeze unused ControlNets entirely (saves gradient memory).
+    # Safe because checkpoint() in ldm/modules/diffusionmodules/util.py now
+    # filters out frozen params before passing to torch.autograd.grad().
+    if not TRAIN_MASK_CN:
+        model.control_model.requires_grad_(False)
+    if not TRAIN_IMAGE_CN:
+        model.image_control_model.requires_grad_(False)
+
+    # Freeze entire UNet when sd_locked=True (saves ~4.7 GB gradient memory).
+    # No UNet params are in the optimizer when locked, so freezing prevents
+    # wasteful gradient buffer allocation. Safe with the checkpoint() fix in
+    # ldm/modules/diffusionmodules/util.py that filters frozen params.
+    if SD_LOCKED:
+        model.model.diffusion_model.requires_grad_(False)
 
     model.decoder_lr_scale    = DECODER_LR_SCALE
     model.loss_weight_mask    = 1.0

@@ -110,7 +110,12 @@ def checkpoint(func, inputs, params, flag):
     :param flag: if False, disable gradient checkpointing.
     """
     if flag:
-        args = tuple(inputs) + tuple(params)
+        # Filter out frozen params: torch.autograd.grad() in backward requires
+        # all input tensors to have requires_grad=True.  Frozen params (from
+        # requires_grad_(False)) are still used in the recomputation but are
+        # treated as constants — no gradients are computed for them.
+        grad_params = [p for p in params if p.requires_grad]
+        args = tuple(inputs) + tuple(grad_params)
         return CheckpointFunction.apply(func, len(inputs), *args)
     else:
         return func(*inputs)
