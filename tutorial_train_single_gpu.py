@@ -227,6 +227,31 @@ PRESETS = {
         "max_steps": 24000,
         "desc": "Paper-faithful ADC: both CNs + distillation, decoders frozen (from SD v1.5)",
     },
+    # ── Paper-faithful v2 — small-batch optimised ───────────────────────────
+    # Addresses gradient competition at batch=4 (vs paper's batch=32):
+    #   - lr=3e-6 (sqrt-scaled from 1e-5 at batch 32)
+    #   - Loss warmup: ramp image/distill losses to avoid early interference
+    #   - LR warmup + cosine decay for stable convergence
+    "paper_faithful_v2_polyp": {
+        "ckpt_path": "./adc_weights/merged_pytorch_model.pth",
+        "strict_load": False,
+        "sd_locked": True,
+        "unlock_last_n": 0,
+        "train_mask_cn": True,
+        "train_image_cn": True,
+        "image_loss": 1.0,
+        "distill_loss": 1.0,
+        "control_weight_mask": 1.0,
+        "control_weight_image": 1.0,
+        "decoder_lr_scale": 0.1,
+        "lr": 3e-6,                  # sqrt-scaled: 1e-5 × sqrt(4/32) ≈ 3.5e-6
+        "max_steps": 30000,
+        "loss_warmup_image": 3000,    # ramp image loss over 3k steps
+        "loss_warmup_distill": 5000,  # ramp distill loss over 5k steps
+        "lr_warmup_steps": 500,       # linear warmup from 0.1× to 1× LR
+        "use_cosine_decay": True,     # cosine anneal to 1e-7 after warmup
+        "desc": "Paper-faithful v2: lr=3e-6, loss warmup, cosine decay (from polyp weights)",
+    },
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -288,7 +313,13 @@ if __name__ == "__main__":
     print(f"  lr: {LR}  |  decoder_lr: {LR * DECODER_LR_SCALE}  |  max_steps: {MAX_STEPS}")
     print(f"  image_loss: {IMAGE_LOSS}  |  distill: {DISTILL_LOSS}")
     print(f"  ctrl_w_mask: {CONTROL_WEIGHT_MASK}  |  ctrl_w_image: {CONTROL_WEIGHT_IMAGE}")
-    print(f"  log_dir:    {LOG_DIR}")
+    _warmup_info = ""
+    if preset.get("loss_warmup_image", 0) > 0 or preset.get("lr_warmup_steps", 0) > 0:
+        _warmup_info = (f"\n  loss_warmup: img={preset.get('loss_warmup_image',0)} "
+                        f"dist={preset.get('loss_warmup_distill',0)}  |  "
+                        f"lr_warmup: {preset.get('lr_warmup_steps',0)} steps  |  "
+                        f"cosine: {preset.get('use_cosine_decay',False)}")
+    print(f"  log_dir:    {LOG_DIR}{_warmup_info}")
     print(f"{'='*60}")
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -398,6 +429,13 @@ if __name__ == "__main__":
     model.loss_weight_distill = DISTILL_LOSS
     model.control_weight_mask  = CONTROL_WEIGHT_MASK
     model.control_weight_image = CONTROL_WEIGHT_IMAGE
+
+    # Loss warmup + LR scheduler params (used by v2 presets)
+    model.loss_warmup_image   = preset.get("loss_warmup_image", 0)
+    model.loss_warmup_distill = preset.get("loss_warmup_distill", 0)
+    model.lr_warmup_steps     = preset.get("lr_warmup_steps", 0)
+    model.use_cosine_decay    = preset.get("use_cosine_decay", False)
+    model.max_training_steps  = MAX_STEPS
 
     # ──────────────────────────────────────────────────────────────────────────
     # Data

@@ -45,6 +45,7 @@ PRESET_DEPS = {
     "polyp_stage2_from_unlocked": "polyp_unlocked",
     "paper_faithful_polyp":      None,         # starts from polyp weights (no dependency)
     "paper_faithful_scratch":    None,         # starts from SD v1.5 (no dependency)
+    "paper_faithful_v2_polyp":   None,         # v2: small-batch optimised (from polyp weights)
 }
 
 # Max steps per preset (must match tutorial_train_single_gpu.py PRESETS dict)
@@ -58,6 +59,7 @@ PRESET_MAX_STEPS = {
     "polyp_stage2_from_unlocked": 10000,
     "paper_faithful_polyp": 24000,
     "paper_faithful_scratch": 24000,
+    "paper_faithful_v2_polyp": 30000,
 }
 
 # Default execution order (topologically sorted — respects dependencies)
@@ -71,6 +73,7 @@ DEFAULT_ORDER = [
     "polyp_stage2_from_unlocked",
     "paper_faithful_polyp",
     "paper_faithful_scratch",
+    "paper_faithful_v2_polyp",
 ]
 
 

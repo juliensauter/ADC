@@ -519,6 +519,43 @@ class ControlLDM(LatentDiffusion):
             )
 
         opt = torch.optim.AdamW(param_groups)
+
+        # LR scheduler: warmup + cosine decay (used by paper_faithful_v2+)
+        use_cosine = getattr(self, 'use_cosine_decay', False)
+        lr_warmup = getattr(self, 'lr_warmup_steps', 0)
+
+        if use_cosine or lr_warmup > 0:
+            max_steps = getattr(self, 'max_training_steps', 30000)
+            sched_list, milestones = [], []
+
+            if lr_warmup > 0:
+                sched_list.append(torch.optim.lr_scheduler.LinearLR(
+                    opt, start_factor=0.1, end_factor=1.0, total_iters=lr_warmup
+                ))
+                milestones.append(lr_warmup)
+
+            if use_cosine:
+                cosine_steps = max(1, max_steps - lr_warmup)
+                sched_list.append(torch.optim.lr_scheduler.CosineAnnealingLR(
+                    opt, T_max=cosine_steps, eta_min=1e-7
+                ))
+
+            if len(sched_list) > 1:
+                scheduler = torch.optim.lr_scheduler.SequentialLR(
+                    opt, schedulers=sched_list, milestones=milestones
+                )
+            else:
+                scheduler = sched_list[0]
+
+            return {
+                "optimizer": opt,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                    "frequency": 1,
+                }
+            }
+
         return opt
 
     def low_vram_shift(self, is_diffusing):
@@ -549,6 +586,16 @@ class ControlLDM(LatentDiffusion):
         w_image = getattr(self, 'loss_weight_image', 0.0)
         w_dist  = getattr(self, 'loss_weight_distill', 0.0)
 
+        # Loss warmup: gradually ramp image/distill losses to avoid gradient
+        # competition during early training when mask CN is establishing baseline
+        warmup_img = getattr(self, 'loss_warmup_image', 0)
+        warmup_dst = getattr(self, 'loss_warmup_distill', 0)
+        step = self.global_step
+        if warmup_img > 0 and step < warmup_img:
+            w_image *= step / warmup_img
+        if warmup_dst > 0 and step < warmup_dst:
+            w_dist *= step / warmup_dst
+
         weights_mask = w_mask * weights_ones             # Loss 0: mask decoder denoising
         weights_image = w_image * weights_ones            # Loss 1: image decoder denoising
         weights_mask_2_image = w_dist * weights_ones      # Loss 2: anatomy-aware distillation
@@ -578,20 +625,31 @@ class ControlLDM(LatentDiffusion):
         else:
             raise NotImplementedError()
 
-        loss_simple = weights_mask * self.get_loss(model_output[0], target, mean=False).mean([1, 2, 3])
+        loss_mask_raw = self.get_loss(model_output[0], target, mean=False).mean([1, 2, 3])
+        loss_simple = weights_mask * loss_mask_raw
         logger.debug("loss_simple_mask: %s", loss_simple.mean())
 
         if weights_image.all():
-            loss_simple_image = self.get_loss(model_output[1], target, mean=False).mean([1, 2, 3])
-            logger.debug("loss_simple_image: %s", loss_simple_image.mean())
-            loss_simple = loss_simple + weights_image * loss_simple_image
+            loss_image_raw = self.get_loss(model_output[1], target, mean=False).mean([1, 2, 3])
+            logger.debug("loss_simple_image: %s", loss_image_raw.mean())
+            loss_simple = loss_simple + weights_image * loss_image_raw
 
         if weights_mask_2_image.all():
-            loss_simple_mask_2_image = (weights * self.get_loss(model_output[0], model_output[1].detach(), mean=False)).mean([1, 2, 3])
-            logger.debug("loss_simple_mask_2_image: %s", loss_simple_mask_2_image.mean())
-            loss_simple = loss_simple + weights_mask_2_image * loss_simple_mask_2_image
+            loss_distill_raw = (weights * self.get_loss(model_output[0], model_output[1].detach(), mean=False)).mean([1, 2, 3])
+            logger.debug("loss_simple_mask_2_image: %s", loss_distill_raw.mean())
+            loss_simple = loss_simple + weights_mask_2_image * loss_distill_raw
 
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
+
+        # Log individual loss components for analysis
+        if self.training:
+            loss_dict[f'{prefix}/loss_mask'] = loss_mask_raw.mean()
+            if weights_image.all():
+                loss_dict[f'{prefix}/loss_image'] = loss_image_raw.mean()
+                loss_dict[f'{prefix}/loss_w_image'] = w_image  # effective weight after warmup
+            if weights_mask_2_image.all():
+                loss_dict[f'{prefix}/loss_distill'] = loss_distill_raw.mean()
+                loss_dict[f'{prefix}/loss_w_distill'] = w_dist  # effective weight after warmup
 
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
