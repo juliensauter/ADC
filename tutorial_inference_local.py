@@ -36,6 +36,7 @@ from torch.utils.data import DataLoader
 from share import *
 from tutorial_dataset_sample import MyDataset
 from cldm.model import create_model, load_state_dict
+from experiment_config import resolve_seed, set_global_seed
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Device selection — MPS / CUDA / CPU
@@ -57,7 +58,8 @@ DEVICE = get_device()
 # ──────────────────────────────────────────────────────────────────────────────
 # Config
 # ──────────────────────────────────────────────────────────────────────────────
-pl.seed_everything(0, workers=True)
+INFERENCE_SEED = resolve_seed()
+set_global_seed(INFERENCE_SEED)
 
 BATCH_SIZE = 1
 # Pretrained ADC polyp weights (downloaded from HuggingFace SylarQ/ADC)
@@ -143,6 +145,7 @@ if __name__ == "__main__":
     print(f"\n{'='*60}")
     print(f"ADC Local Inference")
     print(f"Device:     {DEVICE}")
+    print(f"Seed:       {INFERENCE_SEED}")
     print(f"Checkpoint: {CKPT_PATH}")
     print(f"DDIM steps: {DDIM_STEPS}, eta={DDIM_ETA}, CFG={CFG_SCALE}")
     print(f"Results:    {RESULT_DIR}")

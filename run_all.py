@@ -28,6 +28,8 @@ import csv
 from pathlib import Path
 from datetime import datetime
 
+from experiment_config import PRESET_MAX_STEPS as CONFIG_PRESET_MAX_STEPS
+
 # Always run from ADC project directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -48,19 +50,8 @@ PRESET_DEPS = {
     "paper_faithful_v2_polyp":   None,         # v2: small-batch optimised (from polyp weights)
 }
 
-# Max steps per preset (must match tutorial_train_single_gpu.py PRESETS dict)
-PRESET_MAX_STEPS = {
-    "scratch": 20000,
-    "polyp_transfer": 20000,
-    "scratch_unlocked": 10000,
-    "polyp_unlocked": 10000,
-    "polyp_stage2": 10000,
-    "scratch_stage2": 10000,
-    "polyp_stage2_from_unlocked": 10000,
-    "paper_faithful_polyp": 24000,
-    "paper_faithful_scratch": 24000,
-    "paper_faithful_v2_polyp": 30000,
-}
+# Max steps per preset (shared with tutorial_train_single_gpu.py via config)
+PRESET_MAX_STEPS = CONFIG_PRESET_MAX_STEPS
 
 # Default execution order (topologically sorted — respects dependencies)
 DEFAULT_ORDER = [

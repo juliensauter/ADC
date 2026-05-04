@@ -58,6 +58,8 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 
+from experiment_config import DEFAULT_SEED, resolve_num_folds
+
 # Always run from ADC root
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -226,6 +228,59 @@ def write_split(pairs_list, split, out, args):
     print(f"  [{split}] Wrote {len(entries)} entries → {jsonl_path}")
 
 
+def collect_training_pairs(split_data: dict[str, tuple[list[tuple[Path, Path]], list[str], list[str]]]) -> list[tuple[Path, Path]]:
+    """Flatten all non-test pairs from a pre-split dataset into one training pool."""
+    pairs: list[tuple[Path, Path]] = []
+    for split_name in sorted(split_data):
+        if split_name.lower() == "test":
+            continue
+        pairs.extend(split_data[split_name][0])
+    return pairs
+
+
+def build_folds(pairs: list[tuple[Path, Path]], num_folds: int, seed: int) -> list[list[tuple[Path, Path]]]:
+    """Split pairs into `num_folds` deterministic folds."""
+    if num_folds < 2:
+        raise ValueError(f"num_folds must be >= 2, got {num_folds}")
+    if len(pairs) < num_folds:
+        raise ValueError(f"Need at least {num_folds} pairs for {num_folds}-fold training, got {len(pairs)}")
+
+    shuffled = pairs.copy()
+    random.seed(seed)
+    random.shuffle(shuffled)
+
+    fold_sizes = [len(shuffled) // num_folds + (1 if fold_index < len(shuffled) % num_folds else 0)
+                  for fold_index in range(num_folds)]
+    folds: list[list[tuple[Path, Path]]] = []
+    start = 0
+    for fold_size in fold_sizes:
+        end = start + fold_size
+        folds.append(shuffled[start:end])
+        start = end
+    return folds
+
+
+def write_fold_splits(pairs: list[tuple[Path, Path]], out: Path, args, num_folds: int):
+    folds = build_folds(pairs, num_folds=num_folds, seed=args.seed)
+    print(f"\nCreating {num_folds}-fold split with seed={args.seed}:")
+    for fold_index, val_pairs in enumerate(folds):
+        train_pairs = [pair for other_index, fold_pairs in enumerate(folds) if other_index != fold_index for pair in fold_pairs]
+        fold_root = out / f"fold_{fold_index}"
+        print(f"  fold_{fold_index}: train={len(train_pairs)}  |  val={len(val_pairs)}")
+
+        if args.dry_run:
+            continue
+
+        for split in ("train", "val"):
+            (fold_root / split / "images").mkdir(parents=True, exist_ok=True)
+            (fold_root / split / "masks").mkdir(parents=True, exist_ok=True)
+
+        print(f"    processing fold_{fold_index} train")
+        write_split(train_pairs, "train", fold_root, args)
+        print(f"    processing fold_{fold_index} val")
+        write_split(val_pairs, "val", fold_root, args)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare liver surgery data for ADC training.")
     parser.add_argument("--src",        required=True, help="Root of raw data (must contain images/ and masks/)")
@@ -238,8 +293,12 @@ def main():
                         help="DSAD naming mode: pairs 23_image00.png ↔ 23_mask00_liver.png")
     parser.add_argument("--pre-split",  action="store_true",
                         help="Data is already split into train/val(/test) subdirs")
+    parser.add_argument("--k-fold",     action="store_true",
+                        help="Write fold_{i}/train and fold_{i}/val splits for cross-validation")
+    parser.add_argument("--num-folds",   type=int, default=resolve_num_folds(),
+                        help="Number of folds to generate when --k-fold is enabled [default: 5]")
     parser.add_argument("--dry-run",    action="store_true", help="Preview without writing files")
-    parser.add_argument("--seed",       type=int, default=42, help="Random seed for train/val split")
+    parser.add_argument("--seed",       type=int, default=DEFAULT_SEED, help="Random seed for train/val split")
     args = parser.parse_args()
 
     # Auto-detect pre-split if images/train/ exists
@@ -274,6 +333,15 @@ def main():
             print("\n[DRY RUN] No files written.")
             return
 
+        if args.k_fold:
+            pairs = collect_training_pairs(split_data)
+            if not pairs:
+                print("No training pairs found for k-fold generation.")
+                sys.exit(1)
+            write_fold_splits(pairs, out, args, args.num_folds)
+            print(f"Done! Fold data written to: {out.resolve()}")
+            return
+
         for split_name, (pairs, _, _) in split_data.items():
             if not pairs:
                 continue
@@ -294,6 +362,11 @@ def main():
             hint = ' Try adding --dsad if this is DSAD data.' if not args.dsad else ''
             print(f"No pairs found — check that filenames match between images/ and masks/.{hint}")
             sys.exit(1)
+
+        if args.k_fold:
+            write_fold_splits(pairs, out, args, args.num_folds)
+            print(f"Done! Fold data written to: {out.resolve()}")
+            return
 
         # Train / val split
         random.seed(args.seed)
@@ -318,6 +391,8 @@ def main():
         write_split(val_pairs, "val", out, args)
 
     # ── Combined prompt.json at top level ─────────────────────────────────
+    if args.k_fold:
+        return
     combined_path = out / "prompt.json"
     with open(combined_path, "w") as f:
         for split_name in sorted((out).iterdir()):

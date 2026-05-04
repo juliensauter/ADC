@@ -46,26 +46,42 @@ import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from tutorial_dataset import MyDataset
+from tutorial_dataset_sample import MyDataset as EvalDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
+from adc_training_callbacks import ValidationQualityCallback
+from experiment_config import (
+    DEFAULT_EVAL_CFG_SCALE,
+    DEFAULT_VALIDATION_DDIM_STEPS,
+    PRESET_MAX_STEPS,
+    resolve_early_stop_patience,
+    resolve_float_env,
+    resolve_int_env,
+    resolve_fold_index,
+    resolve_max_steps,
+    resolve_num_folds,
+    resolve_seed,
+    resolve_validation_interval_steps,
+    set_global_seed,
+)
 
 
-def find_source_checkpoint(source_preset: str) -> str:
+def find_source_checkpoint(source_preset: str, fold_tag: str = "") -> str:
     """Find the latest last.ckpt for a source preset.
 
     Searches (in priority order):
-      1. runs/{source_preset}/*/checkpoints/last.ckpt   (new preset system)
+      1. runs/{source_preset}{fold_tag}/*/checkpoints/last.ckpt   (new preset system)
       2. lightning_logs/*/checkpoints/last.ckpt          (legacy, scratch only)
 
     Returns the path to the checkpoint, or raises FileNotFoundError.
     """
-    candidates = sorted(glob.glob(f'runs/{source_preset}/*/checkpoints/last.ckpt'))
-    if not candidates and source_preset == "scratch":
+    candidates = sorted(glob.glob(f'runs/{source_preset}{fold_tag}/*/checkpoints/last.ckpt'))
+    if not candidates and source_preset == "scratch" and not fold_tag:
         candidates = sorted(glob.glob('lightning_logs/*/checkpoints/last.ckpt'))
     if not candidates:
         raise FileNotFoundError(
             f"No checkpoint found for source preset '{source_preset}'.\n"
-            f"  Searched: runs/{source_preset}/*/checkpoints/last.ckpt\n"
+            f"  Searched: runs/{source_preset}{fold_tag}/*/checkpoints/last.ckpt\n"
             f"  Has '{source_preset}' been trained? Run it first."
         )
     return candidates[-1]
@@ -254,6 +270,10 @@ PRESETS = {
     },
 }
 
+for _preset_name, _preset_max_steps in PRESET_MAX_STEPS.items():
+    if _preset_name in PRESETS:
+        PRESETS[_preset_name]["max_steps"] = _preset_max_steps
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Everything below runs training — guarded so PRESETS can be imported safely
 # ──────────────────────────────────────────────────────────────────────────────
@@ -262,20 +282,36 @@ if __name__ == "__main__":
     PRESET_NAME = os.environ.get("PRESET", "scratch")
     assert PRESET_NAME in PRESETS, f"Unknown PRESET={PRESET_NAME!r}. Options: {list(PRESETS.keys())}"
     preset = PRESETS[PRESET_NAME]
+    NUM_FOLDS = resolve_num_folds()
+    FOLD_INDEX = resolve_fold_index(num_folds=NUM_FOLDS)
+    FOLD_TRAIN_ROOT = f'./data/fold_{FOLD_INDEX}/train/prompt.json'
+    FOLD_VAL_ROOT = f'./data/fold_{FOLD_INDEX}/val/prompt.json'
+    USE_KFOLD = os.path.exists(FOLD_TRAIN_ROOT) and os.path.exists(FOLD_VAL_ROOT)
+    FOLD_TAG = f"/fold_{FOLD_INDEX}" if USE_KFOLD else ""
+    if NUM_FOLDS > 1 and not USE_KFOLD:
+        print(
+            f"  [fold] Missing fold data at {FOLD_TRAIN_ROOT} / {FOLD_VAL_ROOT}; "
+            "falling back to ./data/train and ./data/val."
+        )
 
     # Resolve $source_preset markers → actual checkpoint paths
     CKPT_PATH = preset["ckpt_path"]
     if CKPT_PATH.startswith("$"):
         source_preset = CKPT_PATH[1:]
-        CKPT_PATH = find_source_checkpoint(source_preset)
+        CKPT_PATH = find_source_checkpoint(source_preset, FOLD_TAG)
         print(f"  Resolved ${source_preset} → {CKPT_PATH}")
     STRICT_LOAD  = preset["strict_load"]
     SD_LOCKED    = preset["sd_locked"]
     LR           = preset["lr"]
-    MAX_STEPS    = int(os.environ.get('MAX_STEPS', str(preset["max_steps"])))
+    MAX_STEPS    = resolve_max_steps(PRESET_NAME)
     RESUME_PATH  = os.environ.get("RESUME_PATH", None)
-    LOG_DIR      = f"runs/{PRESET_NAME}"
+    LOG_DIR      = f"runs/{PRESET_NAME}{FOLD_TAG}"
     ONLY_MID_CTRL = False
+    VALIDATION_INTERVAL_STEPS = resolve_validation_interval_steps()
+    EARLY_STOP_PATIENCE = resolve_early_stop_patience()
+    TRAINING_SEED = resolve_seed()
+    VAL_DDIM_STEPS = resolve_int_env("VALIDATION_DDIM_STEPS", DEFAULT_VALIDATION_DDIM_STEPS)
+    VAL_CFG_SCALE = resolve_float_env("VAL_CFG_SCALE", DEFAULT_EVAL_CFG_SCALE)
 
     # New preset parameters for fine-grained control
     UNLOCK_LAST_N   = preset.get("unlock_last_n", 0)
@@ -290,13 +326,18 @@ if __name__ == "__main__":
     # ──────────────────────────────────────────────────────────────────────────
     # Reproducibility
     # ──────────────────────────────────────────────────────────────────────────
-    pl.seed_everything(42, workers=True)
+    set_global_seed(TRAINING_SEED)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Data config — set DATA_ROOT to your prepared liver data folder
     # Run: uv run python prepare_liver_data.py --src /path/to/raw --out ./data
     # ──────────────────────────────────────────────────────────────────────────
-    DATA_ROOT    = './data/train/prompt.json'   # train split
+    if USE_KFOLD:
+        DATA_ROOT = FOLD_TRAIN_ROOT
+        VAL_DATA_ROOT = FOLD_VAL_ROOT
+    else:
+        DATA_ROOT = './data/train/prompt.json'   # train split
+        VAL_DATA_ROOT = './data/val/prompt.json'     # validation split
 
     # Image logging frequency — scales with effective batch size so we log after
     # roughly the same number of *samples seen*, regardless of batch/accum config.
@@ -308,6 +349,8 @@ if __name__ == "__main__":
     print(f"  PRESET: {PRESET_NAME}")
     print(f"  {preset['desc']}")
     print(f"  ckpt:       {CKPT_PATH}")
+    print(f"  seed:       {TRAINING_SEED}")
+    print(f"  folds:      {NUM_FOLDS}  |  fold_index: {FOLD_INDEX}  |  kfold: {USE_KFOLD}")
     print(f"  sd_locked:  {SD_LOCKED}  |  unlock_last_n: {UNLOCK_LAST_N}")
     print(f"  mask_cn:    {TRAIN_MASK_CN}  |  image_cn: {TRAIN_IMAGE_CN}")
     print(f"  lr: {LR}  |  decoder_lr: {LR * DECODER_LR_SCALE}  |  max_steps: {MAX_STEPS}")
@@ -440,21 +483,35 @@ if __name__ == "__main__":
     # ──────────────────────────────────────────────────────────────────────────
     # Data
     # ──────────────────────────────────────────────────────────────────────────
-    dataset    = MyDataset(root=DATA_ROOT)
-    dataloader = DataLoader(dataset, num_workers=NUM_WORKERS, batch_size=BATCH_SIZE,
-                            shuffle=True, drop_last=True)
+    dataset      = MyDataset(root=DATA_ROOT)
+    val_dataset  = EvalDataset(root=VAL_DATA_ROOT)
+    dataloader   = DataLoader(dataset, num_workers=NUM_WORKERS, batch_size=BATCH_SIZE,
+                              shuffle=True, drop_last=True)
+    val_dataloader = DataLoader(val_dataset, num_workers=NUM_WORKERS, batch_size=1,
+                                shuffle=False, drop_last=False)
 
     print(f"\nDataset: {len(dataset)} samples, batch_size={BATCH_SIZE}, "
           f"effective_bs={BATCH_SIZE * GRAD_ACCUM}, steps={MAX_STEPS}")
+    print(f"Validation dataset: {len(val_dataset)} samples, val_interval={VALIDATION_INTERVAL_STEPS}")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Callbacks & Logger
     # ──────────────────────────────────────────────────────────────────────────
     logger_cb = ImageLogger(batch_frequency=LOGGER_FREQ)
     ckpt_cb = pl.callbacks.ModelCheckpoint(
-        every_n_train_steps=LOGGER_FREQ * 5,   # save every 2000 steps (5× image log freq)
+        every_n_train_steps=VALIDATION_INTERVAL_STEPS,
         save_last=True,                # always keep last.ckpt (even if killed mid-epoch)
         save_top_k=1,                  # keep latest periodic ckpt + last.ckpt (~18 GB total)
+    )
+    quality_cb = ValidationQualityCallback(
+        val_dataset=val_dataset,
+        save_root=LOG_DIR,
+        interval_steps=VALIDATION_INTERVAL_STEPS,
+        patience=EARLY_STOP_PATIENCE,
+        ddim_steps=VAL_DDIM_STEPS,
+        cfg_scale=VAL_CFG_SCALE,
+        metric_device=os.environ.get("METRIC_DEVICE", "cpu"),
+        num_workers=0,
     )
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -502,13 +559,16 @@ if __name__ == "__main__":
         accelerator=ACCELERATOR,
         devices=DEVICES,
         logger=csv_logger,
-        callbacks=[logger_cb, ckpt_cb],
+        callbacks=[logger_cb, quality_cb, ckpt_cb],
         max_steps=MAX_STEPS,
         accumulate_grad_batches=GRAD_ACCUM,
         precision=PRECISION,
         gradient_clip_val=1.0,
         log_every_n_steps=50,
         enable_checkpointing=True,
+        val_check_interval=VALIDATION_INTERVAL_STEPS,
+        check_val_every_n_epoch=None,
+        num_sanity_val_steps=0,
     )
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -516,12 +576,13 @@ if __name__ == "__main__":
     # ──────────────────────────────────────────────────────────────────────────
     if RESUME_PATH:
         print(f"\nResuming from: {RESUME_PATH}")
-        trainer.fit(model, dataloader, ckpt_path=RESUME_PATH)
+        trainer.fit(model, dataloader, val_dataloader, ckpt_path=RESUME_PATH)
     else:
         print(f"\nStarting training from: {CKPT_PATH}")
-        trainer.fit(model, dataloader)
+        trainer.fit(model, dataloader, val_dataloader)
 
     print(f"\nTraining complete.  [preset={PRESET_NAME}]")
     print(f"Checkpoints saved in: {LOG_DIR}/")
+    print(f"Best checkpoint saved in: {quality_cb.best_checkpoint_path}")
     print(f"Load checkpoint with: model.load_state_dict(load_state_dict('{LOG_DIR}/.../last.ckpt'))")
     print(f"Images saved in:      {LOG_DIR}/image_log/")
