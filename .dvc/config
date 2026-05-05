@@ -1,2 +1,6 @@
 [core]
     autostage = true
+    remote = server_storage
+['remote "server_storage"']
+    url = ssh://mtschi@10.215.44.154//mnt/home/mtschi/dvc_storage
+    ask_password = true
