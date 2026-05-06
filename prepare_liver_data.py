@@ -66,6 +66,16 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 IMG_EXTS  = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 MASK_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
+# Fixed patient-to-fold mapping requested for ADC liver experiments.
+# Fold indices are 0-based in code and map to user-visible folds 1..5.
+FIXED_PATIENT_FOLDS_MARIUS_V1 = {
+    0: {"30", "02", "18", "12", "23"},
+    1: {"03", "13", "20", "22"},
+    2: {"31", "29", "04", "05"},
+    3: {"01", "25", "21", "26"},
+    4: {"28", "15", "11", "24"},
+}
+
 
 def binarize_mask(mask_path: Path, threshold: int = 127) -> Image.Image:
     """Load mask and convert to binary (0/255) single-channel image."""
@@ -238,6 +248,85 @@ def collect_training_pairs(split_data: dict[str, tuple[list[tuple[Path, Path]], 
     return pairs
 
 
+def collect_all_pairs(split_data: dict[str, tuple[list[tuple[Path, Path]], list[str], list[str]]]) -> list[tuple[Path, Path]]:
+    """Flatten all split pairs (including test) into one pool."""
+    pairs: list[tuple[Path, Path]] = []
+    for split_name in sorted(split_data):
+        pairs.extend(split_data[split_name][0])
+    return pairs
+
+
+def _patient_id_from_filename(filename: str) -> str:
+    """Extract 2-digit patient ID from supported naming patterns."""
+    stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    m = re.match(r'^(\d+)_image\d+', stem)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    m = re.match(r'^(\d+)_mask\d+_liver', stem)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    m = re.match(r'^liver_(\d+)_\d+', stem)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    raise ValueError(f"Could not extract patient id from filename: {filename}")
+
+
+def write_fixed_patient_fold_splits(
+    pairs: list[tuple[Path, Path]],
+    out: Path,
+    args,
+    patient_folds: dict[int, set[str]],
+):
+    """Write folds using a fixed patient-to-fold mapping."""
+    expected_patients = set().union(*patient_folds.values())
+    patient_to_pairs: dict[str, list[tuple[Path, Path]]] = {}
+
+    for img_p, mask_p in pairs:
+        patient_id = _patient_id_from_filename(img_p.name)
+        patient_to_pairs.setdefault(patient_id, []).append((img_p, mask_p))
+
+    seen_patients = set(patient_to_pairs.keys())
+    unknown_patients = sorted(seen_patients - expected_patients)
+    missing_patients = sorted(expected_patients - seen_patients)
+
+    if unknown_patients:
+        raise ValueError(
+            "Found patient IDs not present in fixed fold mapping: "
+            + ", ".join(unknown_patients)
+        )
+    if missing_patients:
+        raise ValueError(
+            "Fixed fold mapping expects patient IDs missing from data: "
+            + ", ".join(missing_patients)
+        )
+
+    print("\nCreating fixed patient-based 5-fold split (marius_v1):")
+    for fold_index in range(5):
+        val_patients = patient_folds[fold_index]
+        train_patients = expected_patients - val_patients
+
+        val_pairs = [pair for pid in sorted(val_patients) for pair in patient_to_pairs[pid]]
+        train_pairs = [pair for pid in sorted(train_patients) for pair in patient_to_pairs[pid]]
+
+        fold_root = out / f"fold_{fold_index}"
+        print(
+            f"  fold_{fold_index}: val_patients={sorted(val_patients)} "
+            f"| train={len(train_pairs)} | val={len(val_pairs)}"
+        )
+
+        if args.dry_run:
+            continue
+
+        for split in ("train", "val"):
+            (fold_root / split / "images").mkdir(parents=True, exist_ok=True)
+            (fold_root / split / "masks").mkdir(parents=True, exist_ok=True)
+
+        print(f"    processing fold_{fold_index} train")
+        write_split(train_pairs, "train", fold_root, args)
+        print(f"    processing fold_{fold_index} val")
+        write_split(val_pairs, "val", fold_root, args)
+
+
 def build_folds(pairs: list[tuple[Path, Path]], num_folds: int, seed: int) -> list[list[tuple[Path, Path]]]:
     """Split pairs into `num_folds` deterministic folds."""
     if num_folds < 2:
@@ -297,6 +386,12 @@ def main():
                         help="Write fold_{i}/train and fold_{i}/val splits for cross-validation")
     parser.add_argument("--num-folds",   type=int, default=resolve_num_folds(),
                         help="Number of folds to generate when --k-fold is enabled [default: 5]")
+    parser.add_argument(
+        "--fixed-patient-folds",
+        choices=["none", "marius_v1"],
+        default="none",
+        help="Use a fixed patient-to-fold mapping instead of random k-fold splitting",
+    )
     parser.add_argument("--dry-run",    action="store_true", help="Preview without writing files")
     parser.add_argument("--seed",       type=int, default=DEFAULT_SEED, help="Random seed for train/val split")
     args = parser.parse_args()
@@ -334,6 +429,14 @@ def main():
             return
 
         if args.k_fold:
+            if args.fixed_patient_folds == "marius_v1":
+                pairs = collect_all_pairs(split_data)
+                if args.num_folds != 5:
+                    raise ValueError("--fixed-patient-folds marius_v1 requires --num-folds 5")
+                write_fixed_patient_fold_splits(pairs, out, args, FIXED_PATIENT_FOLDS_MARIUS_V1)
+                print(f"Done! Fixed fold data written to: {out.resolve()}")
+                return
+
             pairs = collect_training_pairs(split_data)
             if not pairs:
                 print("No training pairs found for k-fold generation.")
