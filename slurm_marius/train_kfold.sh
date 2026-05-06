@@ -20,7 +20,33 @@
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-cd "$HOME/ADC"
+
+# Resolve project dir in a robust way:
+# 1) PROJECT_DIR override, 2) sbatch submit dir, 3) legacy $HOME/ADC fallback.
+PROJECT_DIR=${PROJECT_DIR:-${SLURM_SUBMIT_DIR:-$HOME/ADC}}
+if [[ ! -d "$PROJECT_DIR" ]]; then
+    echo "[ERROR] PROJECT_DIR does not exist: $PROJECT_DIR"
+    exit 2
+fi
+cd "$PROJECT_DIR"
+
+if [[ ! -f "run_kfold.py" ]]; then
+    echo "[ERROR] run_kfold.py not found in $PROJECT_DIR"
+    echo "        Submit from ADC repo root or set PROJECT_DIR explicitly."
+    exit 2
+fi
+
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+if ! command -v uv &>/dev/null; then
+    echo "[INFO] uv not found, installing for user..."
+    curl -LsSf https://astral.sh/uv/install.sh | bash
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+if ! command -v uv &>/dev/null; then
+    echo "[ERROR] uv is still unavailable after install attempt."
+    exit 2
+fi
 
 export PRESET=${PRESET:-scratch}
 export TRAINING_TARGET=${TRAINING_TARGET:-workstation}
@@ -32,6 +58,11 @@ if [[ -n "${FOLDS:-}" ]]; then
 fi
 
 echo "K-fold job $SLURM_JOB_ID on $(hostname)"
+echo "Project dir: $PROJECT_DIR"
+echo "Working dir: $(pwd)"
+echo "uv version: $(uv --version)"
+echo "Python: $(uv run python -c 'import sys; print(sys.executable)')"
+echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 || echo unavailable)"
 echo "Preset: $PRESET"
 echo "Training target: $TRAINING_TARGET"
 echo "Num folds: $NUM_FOLDS"

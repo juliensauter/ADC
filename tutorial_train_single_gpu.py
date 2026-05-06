@@ -34,6 +34,7 @@ Key differences vs original tutorial_train.py:
 
 import os
 import sys
+import traceback
 
 # Always run from ADC project directory (so relative paths like ./data work correctly)
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -427,6 +428,20 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown TRAINING_TARGET: {TRAINING_TARGET!r}. "
                          "Choose 'mps', 'dgx_single', 'dgx_multi', or 'workstation'")
 
+    # Optional runtime overrides for easier SLURM troubleshooting.
+    precision_override = os.environ.get("PRECISION_OVERRIDE", "").strip()
+    if precision_override:
+        PRECISION = precision_override
+        print(f"  precision override: {PRECISION}")
+
+    num_workers_override = os.environ.get("NUM_WORKERS_OVERRIDE", "").strip()
+    if num_workers_override:
+        NUM_WORKERS = int(num_workers_override)
+        print(f"  num_workers override: {NUM_WORKERS}")
+
+    skip_sanity_check = os.environ.get("SKIP_SANITY_CHECK", "0") == "1"
+    allow_sanity_failure = os.environ.get("ALLOW_SANITY_FAILURE", "0") == "1"
+
     # ──────────────────────────────────────────────────────────────────────────
     # Auto-compute image log frequency if not manually set
     # Goal: log after roughly _BASE_LOG_SAMPLES samples regardless of batch config
@@ -529,7 +544,7 @@ if __name__ == "__main__":
     # ──────────────────────────────────────────────────────────────────────────
     # Sanity check: run 2 steps + 1 image log to verify setup (skip on resume)
     # ──────────────────────────────────────────────────────────────────────────
-    if RESUME_PATH is None:
+    if RESUME_PATH is None and not skip_sanity_check:
         print("\n── Sanity check: 2 training steps + image generation ──")
         sanity_logger = ImageLogger(batch_frequency=1, log_first_step=True)
         sanity_csv = pl.loggers.CSVLogger(save_dir=LOG_DIR, name="sanity")
@@ -545,8 +560,17 @@ if __name__ == "__main__":
             log_every_n_steps=1,
             enable_checkpointing=False,
         )
-        sanity_trainer.fit(model, dataloader)
-        print("── Sanity check passed ✓ ──\n")
+        try:
+            sanity_trainer.fit(model, dataloader)
+            print("── Sanity check passed ✓ ──\n")
+        except Exception:
+            print("── Sanity check FAILED ──")
+            traceback.print_exc()
+            if not allow_sanity_failure:
+                raise
+            print("Continuing because ALLOW_SANITY_FAILURE=1")
+    elif skip_sanity_check:
+        print("\nSkipping sanity check (SKIP_SANITY_CHECK=1)")
     else:
         print(f"\nSkipping sanity check (resuming from checkpoint)")
 
