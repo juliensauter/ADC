@@ -11,7 +11,7 @@
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=s-jsaute@haw-landshut.de
+#SBATCH --mail-user=s-mtschi@haw-landshut.de
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 cd "$HOME/ADC"
