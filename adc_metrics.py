@@ -26,12 +26,29 @@ from experiment_config import (
 IMG_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
 
+def _prepare_batch_tensor(image: torch.Tensor) -> torch.Tensor:
+    image = image.detach().cpu()
+    if image.ndim == 2:
+        return image.unsqueeze(0).unsqueeze(0)
+    if image.ndim == 3:
+        if image.shape[0] in (1, 3) and image.shape[-1] not in (1, 3):
+            return image.unsqueeze(0)
+        if image.shape[-1] in (1, 3):
+            return image.permute(2, 0, 1).unsqueeze(0)
+    elif image.ndim == 4:
+        if image.shape[1] in (1, 3):
+            return image
+        if image.shape[-1] in (1, 3):
+            return image.permute(0, 3, 1, 2)
+    raise ValueError(f"Expected image tensor in CHW or HWC layout, got shape {tuple(image.shape)}.")
+
+
 def _ensure_batch_tensor(images: torch.Tensor | Sequence[torch.Tensor]) -> torch.Tensor:
     if isinstance(images, torch.Tensor):
-        return images.detach().cpu()
+        return _prepare_batch_tensor(images)
     if not images:
         raise ValueError("Expected at least one image batch.")
-    return torch.cat([image.detach().cpu() for image in images], dim=0)
+    return torch.cat([_prepare_batch_tensor(image) for image in images], dim=0)
 
 
 def _to_unit_range(images: torch.Tensor) -> torch.Tensor:
@@ -43,34 +60,36 @@ def _to_unit_range(images: torch.Tensor) -> torch.Tensor:
     return images.clamp(0.0, 1.0)
 
 
-def save_rgb_tensor(image: torch.Tensor, path: str | Path) -> None:
+def _prepare_image_tensor(image: torch.Tensor) -> torch.Tensor:
     image = image.detach().cpu().float()
     if image.ndim == 4:
         if image.shape[0] != 1:
-            raise ValueError("save_rgb_tensor expects a single image or a batch of size 1.")
+            raise ValueError("Expected a single image or a batch of size 1.")
         image = image[0]
-    image = _to_unit_range(image.unsqueeze(0))[0]
-    array = (image.permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype(np.uint8)
+    if image.ndim == 2:
+        image = image.unsqueeze(-1)
+    if image.ndim != 3:
+        raise ValueError(f"Expected an image tensor with 2, 3, or 4 dimensions, got shape {tuple(image.shape)}.")
+    if image.shape[0] in (1, 3) and image.shape[-1] not in (1, 3):
+        image = image.permute(1, 2, 0)
+    return _to_unit_range(image)
+
+
+def save_rgb_tensor(image: torch.Tensor, path: str | Path) -> None:
+    image = _prepare_image_tensor(image)
+    if image.shape[-1] == 1:
+        array = (image[..., 0].numpy() * 255.0).clip(0, 255).astype(np.uint8)
+        pil_image = Image.fromarray(array).convert("RGB")
+    else:
+        array = (image.numpy() * 255.0).clip(0, 255).astype(np.uint8)
+        pil_image = Image.fromarray(array)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(array).save(path)
+    pil_image.save(path)
 
 
 def save_mask_tensor(mask: torch.Tensor, path: str | Path) -> None:
-    mask = mask.detach().cpu().float()
-    if mask.ndim == 4:
-        if mask.shape[0] != 1:
-            raise ValueError("save_mask_tensor expects a single mask or a batch of size 1.")
-        mask = mask[0]
-    if mask.ndim == 3:
-        if mask.shape[0] in (1, 3):
-            mask = mask[0]
-        else:
-            mask = mask.squeeze(0)
-    if mask.max() > 1.5:
-        mask = mask / 255.0
-    elif mask.min() < 0.0:
-        mask = (mask + 1.0) / 2.0
-    array = (mask.numpy() * 255.0).clip(0, 255).astype(np.uint8)
+    mask = _prepare_image_tensor(mask)
+    array = (mask[..., 0].numpy() * 255.0).clip(0, 255).astype(np.uint8)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(array).convert("L").save(path)
 
