@@ -495,16 +495,22 @@ class ControlLDM(LatentDiffusion):
                     x_samples_cfg = self.decode_first_stage(samples_cfg)
                     log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_mask"] = x_samples_cfg
 
-                    uc_cat_image = c_cat_image  # torch.zeros_like(c_cat_1)
-                    uc_full = {"c_concat": [uc_cat], "c_concat_image": [uc_cat_image], "c_crossattn": [uc_cross]}
-                    samples_cfg_image, _ = self.sample_log(cond={"c_concat": [c_cat_mask], "c_concat_image": [c_cat_image], "c_crossattn": [c]},
-                                                     batch_size=N, ddim=use_ddim,
-                                                     ddim_steps=ddim_steps, eta=ddim_eta,
-                                                     unconditional_guidance_scale=unconditional_guidance_scale,
-                                                     unconditional_conditioning=uc_full,
-                                                     )
-                    x_samples_cfg_image = self.decode_first_stage(samples_cfg_image)
-                    log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_image"] = x_samples_cfg_image
+                    # A4: skip the dual-CN (mask+image) sampling chain when the
+                    # env var ADC_LOG_IMAGES_SKIP_DUAL_CN=1 is set. Halves
+                    # log_images cost when only the mask-only "production" path
+                    # matters (e.g. during Phase 1 mask-only training, or for
+                    # quick visual sanity checks). Default keeps both paths.
+                    if os.environ.get("ADC_LOG_IMAGES_SKIP_DUAL_CN", "0") != "1":
+                        uc_cat_image = c_cat_image  # torch.zeros_like(c_cat_1)
+                        uc_full = {"c_concat": [uc_cat], "c_concat_image": [uc_cat_image], "c_crossattn": [uc_cross]}
+                        samples_cfg_image, _ = self.sample_log(cond={"c_concat": [c_cat_mask], "c_concat_image": [c_cat_image], "c_crossattn": [c]},
+                                                         batch_size=N, ddim=use_ddim,
+                                                         ddim_steps=ddim_steps, eta=ddim_eta,
+                                                         unconditional_guidance_scale=unconditional_guidance_scale,
+                                                         unconditional_conditioning=uc_full,
+                                                         )
+                        x_samples_cfg_image = self.decode_first_stage(samples_cfg_image)
+                        log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_image"] = x_samples_cfg_image
 
         finally:
             torch.set_rng_state(cpu_rng_state)
