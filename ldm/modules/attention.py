@@ -243,15 +243,61 @@ class MemoryEfficientCrossAttention(nn.Module):
         return self.to_out(out)
 
 
+
+class SDPCrossAttention(nn.Module):
+    """A6: SDPA-backed CrossAttention. Opt-in via ADC_USE_SDPA=1.
+
+    Drop-in replacement for CrossAttention using torch.nn.functional.
+    scaled_dot_product_attention, which on CUDA dispatches to Flash /
+    memory-efficient kernels. Behaviour identical to CrossAttention
+    except mask is not supported (we never use it).
+    """
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        context_dim = default(context_dim, query_dim)
+        self.heads = heads
+        self.dim_head = dim_head
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, query_dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x, context=None, mask=None):
+        if mask is not None:
+            raise NotImplementedError("SDPCrossAttention: mask is not supported")
+        h = self.heads
+        q = self.to_q(x)
+        context = default(context, x)
+        k = self.to_k(context)
+        v = self.to_v(context)
+        q, k, v = map(
+            lambda t: rearrange(t, 'b n (h d) -> b h n d', h=h),
+            (q, k, v)
+        )
+        out = F.scaled_dot_product_attention(q, k, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        return self.to_out(out)
+
+
 class BasicTransformerBlock(nn.Module):
     ATTENTION_MODES = {
         "softmax": CrossAttention,  # vanilla attention
-        "softmax-xformers": MemoryEfficientCrossAttention
+        "softmax-xformers": MemoryEfficientCrossAttention,
+        "softmax-sdpa": SDPCrossAttention,  # A6: torch SDPA backend
     }
     def __init__(self, dim, n_heads, d_head, dropout=0., context_dim=None, gated_ff=True, checkpoint=True,
                  disable_self_attn=False):
         super().__init__()
-        attn_mode = "softmax-xformers" if XFORMERS_IS_AVAILBLE else "softmax"
+        if os.environ.get("ADC_USE_SDPA", "0") == "1":
+            attn_mode = "softmax-sdpa"
+        elif XFORMERS_IS_AVAILBLE:
+            attn_mode = "softmax-xformers"
+        else:
+            attn_mode = "softmax"
         assert attn_mode in self.ATTENTION_MODES
         attn_cls = self.ATTENTION_MODES[attn_mode]
         self.disable_self_attn = disable_self_attn
