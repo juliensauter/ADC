@@ -409,6 +409,12 @@ class ControlLDM(LatentDiffusion):
                    **kwargs):
         use_ddim = ddim_steps is not None
 
+        # A5: allow N override via env var (default keeps signature value).
+        # Set ADC_LOG_IMAGES_N=2 during training to halve sampling cost
+        # (~2x speedup per log_images call). Tutorial inference scripts
+        # pass N explicitly, so they are unaffected unless the env var
+        # is set in their environment.
+        N = int(os.environ.get("ADC_LOG_IMAGES_N", N))
         # A1 inference speedup: run sampling + VAE decode under autocast.
         # Matches Maxim's diffusers fp16 pattern; weights stay fp32 so training is unaffected.
         # CUDA -> bf16 (matches training's bf16-mixed; better range than fp16 on H100/A100, no NaN risk).
