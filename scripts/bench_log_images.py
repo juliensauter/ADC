@@ -41,7 +41,7 @@ CKPT_PATH = os.environ.get(
     "CKPT_PATH",
     "./lightning_logs/version_0/checkpoints/last.ckpt",
 )
-CONFIG_PATH = os.environ.get("CONFIG_PATH", "./models/cldm_v15_dual_decoder.yaml")
+CONFIG_PATH = os.environ.get("CONFIG_PATH", "./models/cldm_v15.yaml")
 BATCH_SIZE = int(os.environ.get("BENCH_BATCH_SIZE", "4"))
 DDIM_STEPS = int(os.environ.get("BENCH_DDIM_STEPS", "50"))
 CFG_SCALE = float(os.environ.get("BENCH_CFG_SCALE", "9.0"))
