@@ -408,67 +408,81 @@ class ControlLDM(LatentDiffusion):
                    **kwargs):
         use_ddim = ddim_steps is not None
 
-        log = dict()
-        z, c = self.get_input(batch, self.first_stage_key, bs=N)
-        c_cat_mask, c_cat_image, c = c["c_concat_mask"][0][:N], c["c_concat_image"][0][:N], c["c_crossattn"][0][:N]
-        N = min(z.shape[0], N)
-        n_row = min(z.shape[0], n_row)
-        log["control_mask"] = c_cat_mask * 2.0 - 1.0
-        log["control_image"] = c_cat_image * 2.0 - 1.0
-        log["conditioning"] = log_txt_as_img((384, 384), batch[self.cond_stage_key], size=16)
+        # A1 inference speedup: run sampling + VAE decode under autocast.
+        # Matches Maxim's diffusers fp16 pattern; weights stay fp32 so training is unaffected.
+        # CUDA -> bf16 (matches training's bf16-mixed; better range than fp16 on H100/A100, no NaN risk).
+        # MPS  -> bf16 (well-supported on Apple Silicon; fp16 would underflow at small magnitudes).
+        # CPU/other -> autocast disabled.
+        device_type = self.device.type
+        if device_type in ("cuda", "mps"):
+            autocast_dtype = torch.bfloat16
+            autocast_enabled = True
+        else:
+            autocast_dtype = torch.float32
+            autocast_enabled = False
 
-        if plot_diffusion_rows:
-            # get diffusion row
-            diffusion_row = list()
-            z_start = z[:n_row]
-            for t in range(self.num_timesteps):
-                if t % self.log_every_t == 0 or t == self.num_timesteps - 1:
-                    t = repeat(torch.tensor([t]), '1 -> b', b=n_row)
-                    t = t.to(self.device).long()
-                    noise = torch.randn_like(z_start)
-                    z_noisy = self.q_sample(x_start=z_start, t=t, noise=noise)
-                    diffusion_row.append(self.decode_first_stage(z_noisy))
+        with torch.autocast(device_type=device_type, dtype=autocast_dtype, enabled=autocast_enabled):
+            log = dict()
+            z, c = self.get_input(batch, self.first_stage_key, bs=N)
+            c_cat_mask, c_cat_image, c = c["c_concat_mask"][0][:N], c["c_concat_image"][0][:N], c["c_crossattn"][0][:N]
+            N = min(z.shape[0], N)
+            n_row = min(z.shape[0], n_row)
+            log["control_mask"] = c_cat_mask * 2.0 - 1.0
+            log["control_image"] = c_cat_image * 2.0 - 1.0
+            log["conditioning"] = log_txt_as_img((384, 384), batch[self.cond_stage_key], size=16)
 
-            diffusion_row = torch.stack(diffusion_row)  # n_log_step, n_row, C, H, W
-            diffusion_grid = rearrange(diffusion_row, 'n b c h w -> b n c h w')
-            diffusion_grid = rearrange(diffusion_grid, 'b n c h w -> (b n) c h w')
-            diffusion_grid = make_grid(diffusion_grid, nrow=diffusion_row.shape[0])
-            log["diffusion_row"] = diffusion_grid
+            if plot_diffusion_rows:
+                # get diffusion row
+                diffusion_row = list()
+                z_start = z[:n_row]
+                for t in range(self.num_timesteps):
+                    if t % self.log_every_t == 0 or t == self.num_timesteps - 1:
+                        t = repeat(torch.tensor([t]), '1 -> b', b=n_row)
+                        t = t.to(self.device).long()
+                        noise = torch.randn_like(z_start)
+                        z_noisy = self.q_sample(x_start=z_start, t=t, noise=noise)
+                        diffusion_row.append(self.decode_first_stage(z_noisy))
 
-        if sample:
-            # get denoise row
-            samples, z_denoise_row = self.sample_log(cond={"c_concat": [c_cat_mask], "c_crossattn": [c]},
-                                                     batch_size=N, ddim=use_ddim,
-                                                     ddim_steps=ddim_steps, eta=ddim_eta)
-            x_samples = self.decode_first_stage(samples)
-            log["samples"] = x_samples
-            if plot_denoise_rows:
-                denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
-                log["denoise_row"] = denoise_grid
+                diffusion_row = torch.stack(diffusion_row)  # n_log_step, n_row, C, H, W
+                diffusion_grid = rearrange(diffusion_row, 'n b c h w -> b n c h w')
+                diffusion_grid = rearrange(diffusion_grid, 'b n c h w -> (b n) c h w')
+                diffusion_grid = make_grid(diffusion_grid, nrow=diffusion_row.shape[0])
+                log["diffusion_row"] = diffusion_grid
 
-        if unconditional_guidance_scale > 1.0:
-            uc_cross = self.get_unconditional_conditioning(N)
-            uc_cat = c_cat_mask  # torch.zeros_like(c_cat)
-            uc_full = {"c_concat": [uc_cat], "c_crossattn": [uc_cross]}
-            samples_cfg, _ = self.sample_log(cond={"c_concat": [c_cat_mask], "c_crossattn": [c]},
-                                             batch_size=N, ddim=use_ddim,
-                                             ddim_steps=ddim_steps, eta=ddim_eta,
-                                             unconditional_guidance_scale=unconditional_guidance_scale,
-                                             unconditional_conditioning=uc_full,
-                                             )
-            x_samples_cfg = self.decode_first_stage(samples_cfg)
-            log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_mask"] = x_samples_cfg
+            if sample:
+                # get denoise row
+                samples, z_denoise_row = self.sample_log(cond={"c_concat": [c_cat_mask], "c_crossattn": [c]},
+                                                         batch_size=N, ddim=use_ddim,
+                                                         ddim_steps=ddim_steps, eta=ddim_eta)
+                x_samples = self.decode_first_stage(samples)
+                log["samples"] = x_samples
+                if plot_denoise_rows:
+                    denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
+                    log["denoise_row"] = denoise_grid
 
-            uc_cat_image = c_cat_image  # torch.zeros_like(c_cat_1)
-            uc_full = {"c_concat": [uc_cat], "c_concat_image": [uc_cat_image], "c_crossattn": [uc_cross]}
-            samples_cfg_image, _ = self.sample_log(cond={"c_concat": [c_cat_mask], "c_concat_image": [c_cat_image], "c_crossattn": [c]},
-                                             batch_size=N, ddim=use_ddim,
-                                             ddim_steps=ddim_steps, eta=ddim_eta,
-                                             unconditional_guidance_scale=unconditional_guidance_scale,
-                                             unconditional_conditioning=uc_full,
-                                             )
-            x_samples_cfg_image = self.decode_first_stage(samples_cfg_image)
-            log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_image"] = x_samples_cfg_image
+            if unconditional_guidance_scale > 1.0:
+                uc_cross = self.get_unconditional_conditioning(N)
+                uc_cat = c_cat_mask  # torch.zeros_like(c_cat)
+                uc_full = {"c_concat": [uc_cat], "c_crossattn": [uc_cross]}
+                samples_cfg, _ = self.sample_log(cond={"c_concat": [c_cat_mask], "c_crossattn": [c]},
+                                                 batch_size=N, ddim=use_ddim,
+                                                 ddim_steps=ddim_steps, eta=ddim_eta,
+                                                 unconditional_guidance_scale=unconditional_guidance_scale,
+                                                 unconditional_conditioning=uc_full,
+                                                 )
+                x_samples_cfg = self.decode_first_stage(samples_cfg)
+                log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_mask"] = x_samples_cfg
+
+                uc_cat_image = c_cat_image  # torch.zeros_like(c_cat_1)
+                uc_full = {"c_concat": [uc_cat], "c_concat_image": [uc_cat_image], "c_crossattn": [uc_cross]}
+                samples_cfg_image, _ = self.sample_log(cond={"c_concat": [c_cat_mask], "c_concat_image": [c_cat_image], "c_crossattn": [c]},
+                                                 batch_size=N, ddim=use_ddim,
+                                                 ddim_steps=ddim_steps, eta=ddim_eta,
+                                                 unconditional_guidance_scale=unconditional_guidance_scale,
+                                                 unconditional_conditioning=uc_full,
+                                                 )
+                x_samples_cfg_image = self.decode_first_stage(samples_cfg_image)
+                log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}_image"] = x_samples_cfg_image
 
         return log
 
