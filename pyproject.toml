@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "torch",
     "torchvision",
-    "pytorch-lightning",
+    "pytorch-lightning==2.6.1",  # pinned: 2.6.2 + 2.6.3 had a supply-chain compromise (May 2026)
     "einops",
     "omegaconf",
     "albumentations",
