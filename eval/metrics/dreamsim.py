@@ -36,8 +36,6 @@ class DreamSimMetric(Metric):
                 if torch.cuda.is_available()
                 else ("mps" if torch.backends.mps.is_available() else "cpu")
             )
-        self.device_str = device
-        
         # Load the model
         self.model, _ = dreamsim(
             pretrained=pretrained,
@@ -52,13 +50,16 @@ class DreamSimMetric(Metric):
         self.add_state("sum_scores", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("total_pairs", default=torch.tensor(0), dist_reduce_fx="sum")
 
+        # Move the metric's states to the target device
+        self.to(device)
+
     def update(self, img1: Tensor, img2: Tensor) -> None:
         """Accumulate distance scores between paired batch images."""
         if img1.shape != img2.shape:
             raise ValueError(f"Shape mismatch: {img1.shape} vs {img2.shape}")
 
-        img1 = img1.to(self.device_str)
-        img2 = img2.to(self.device_str)
+        img1 = img1.to(self.device)
+        img2 = img2.to(self.device)
 
         # Resize internally to 224x224 as required by the ViT backbone
         if img1.shape[-2:] != (_DEFAULT_SIZE, _DEFAULT_SIZE):
