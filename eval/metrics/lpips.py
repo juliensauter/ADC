@@ -17,12 +17,50 @@ Rationale (see ``working/notes/metrics_kid_lpips.md`` §2 + §3):
 Input convention: ``[N, 3, H, W]`` in [0, 1] range (``normalize=True`` handles
 the [0, 1] -> internal [-1, 1] mapping), matching ``kid.py``.
 """
-
-from __future__ import annotations
-
+import torch
+import torch.nn.functional as F
+from torch import Tensor
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 _DEFAULT_NET = "alex"
+_DEFAULT_INPUT_SIZE = 256
+
+
+class NormalizedResizedLPIPS(LearnedPerceptualImagePatchSimilarity):
+    """Subclass of LearnedPerceptualImagePatchSimilarity that enforces resizing.
+
+    Forces input tensors to 256x256 before computing LPIPS, matching the
+    resolution the weights were trained on and ensuring literature comparability.
+    """
+
+    def __init__(
+        self,
+        net_type: str = _DEFAULT_NET,
+        reduction: str = "mean",
+        normalize: bool = True,
+        input_size: int = _DEFAULT_INPUT_SIZE,
+        **kwargs,
+    ) -> None:
+        super().__init__(net_type=net_type, reduction=reduction, normalize=normalize, **kwargs)
+        self.input_size = input_size
+
+    def update(self, img1: Tensor, img2: Tensor) -> None:
+        """Update state with resized matched image pairs."""
+        if img1.shape[-2:] != (self.input_size, self.input_size):
+            img1 = F.interpolate(
+                img1,
+                size=(self.input_size, self.input_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+        if img2.shape[-2:] != (self.input_size, self.input_size):
+            img2 = F.interpolate(
+                img2,
+                size=(self.input_size, self.input_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+        super().update(img1, img2)
 
 
 def make_lpips(
@@ -34,11 +72,12 @@ def make_lpips(
     Call ``.update(img1, img2)`` with matched pairs (both ``[N, 3, H, W]`` in
     [0, 1]) then ``.compute()`` for the mean LPIPS distance.
     """
-    return LearnedPerceptualImagePatchSimilarity(
+    return NormalizedResizedLPIPS(
         net_type=net_type,
         reduction=reduction,
         normalize=True,
     )
 
 
-__all__ = ["make_lpips"]
+__all__ = ["make_lpips", "NormalizedResizedLPIPS"]
+
