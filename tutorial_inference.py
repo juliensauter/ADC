@@ -9,8 +9,10 @@ from torch.utils.data import DataLoader
 from tutorial_dataset_sample import MyDataset
 from cldm.model import create_model, load_state_dict
 from safetensors.torch import load_file
+from experiment_config import resolve_seed, set_global_seed
 
-pl.seed_everything(0, workers=True)
+INFERENCE_SEED = resolve_seed()
+set_global_seed(INFERENCE_SEED)
 
 BATCH_SIZE = 1
 CKPT_PATH = "./lightning_logs/version_0/checkpoints/epoch/merged_pytorch_model.pth"

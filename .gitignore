@@ -32,10 +32,8 @@ adc_*.err
 
 dataset/
 /dataset
-
 # throwaway metric smoke scripts
 eval/_smoke_*.py
 
 # dreamsim local weights cache
 dreamsim_cache/
-

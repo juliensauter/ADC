@@ -3,8 +3,8 @@
 # Or run: uv run python setup_adc.py --deps-only
 
 # Core
-torch
-torchvision
+torch==2.10.0
+torchvision==0.25.0
 pytorch-lightning
 einops
 omegaconf

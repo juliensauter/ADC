@@ -58,8 +58,13 @@ uv run python tutorial_train_single_gpu.py
 | **`setup_adc.py`** | 🚀 Setup | One-command project setup (deps + weights + checkpoint) |
 | **`tutorial_inference_local.py`** | 🎨 Inference | MPS/CPU/CUDA inference (replaces `tutorial_inference.py`) |
 | **`tutorial_train_single_gpu.py`** | 🏋️ Training | 1-line hardware switch: `"mps"` / `"dgx_single"` / `"dgx_multi"` |
+| **`run_kfold.py`** | 🔁 Cross-val | Sequential k-fold training for one preset |
+| **`tutorial_test_eval.py`** | 📊 Test eval | Multi-seed test generation + KID/FDD/LPIPS/mIoU reporting |
+| **`experiment_config.py`** | ⚙️ Config | Shared defaults for seed, step cadence, patience, and test seeds |
+| **`adc_metrics.py`** | 📏 Metrics | DINOv2 KID/FDD, LPIPS, mIoU, and shared image I/O helpers |
+| **`adc_training_callbacks.py`** | 🪝 Training | Periodic validation generation, best checkpoint saving, early stop |
 | **`prepare_liver_data.py`** | 📦 Data | Converts raw images+masks into ADC format, splits train/val |
-| **`evaluate_adc.py`** | 📊 Evaluation | FID, SSIM, LPIPS metrics between real and generated images |
+| **`evaluate_adc.py`** | 📊 Evaluation | Legacy FID/SSIM/LPIPS helper between real and generated images |
 | **`segmentation_integration.py`** | 🧩 Integration | Joint ADC + segmentation model training (Strategy A: differentiable, Strategy B: 2-stage) |
 | `create_control_ckpt.py` | 🔧 Utility | Creates `control_sd15.ckpt` from SD v1.5 (called by `setup_adc.py`) |
 | `download_weights.py` | 🔧 Utility | Downloads SD v1.5 + ADC weights from HuggingFace |
@@ -169,7 +174,13 @@ We evaluated our method on three public datasets: [Polyps](https://github.com/De
 
 A new initialization scheme has been implemented in `tool_add_control.py` to accommodate changes in the model architecture and generate `control_sd15.ckpt`.
 
+The single-GPU training loop in `tutorial_train_single_gpu.py` now evaluates the validation split every 2000 steps, generates mask-conditioned images, tracks KID (DINOv2) and LPIPS (AlexNet), saves `best.ckpt`, and stops after 3 non-improving evaluation events. The shared defaults for seed, validation cadence, patience, and test seeds live in `experiment_config.py` and can be overridden via environment variables.
+
+For cross-validation, prepare the data with `prepare_liver_data.py --k-fold --num-folds 5` and then run `run_kfold.py` or `slurm/train_kfold.sh` for one preset. The fold index is controlled through `FOLD_INDEX`, and the fold count comes from `NUM_FOLDS` in config or the environment.
+
 Inspired by [Siamese-Diffusion](https://github.com/Qiukunpeng/Siamese-Diffusion), the **DHI** module is integrated as a default component.
+
+For final test runs, use `tutorial_test_eval.py` to generate the full test split across 10 seeds and report KID, FDD, LPIPS, and mIoU.
 
 Here are example commands for training:
 ```bash

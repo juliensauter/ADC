@@ -10,8 +10,10 @@ from torch.utils.data import DataLoader
 from tutorial_dataset import MyDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict, compare_weights
+from experiment_config import resolve_seed, set_global_seed
 
-pl.seed_everything(42, workers=True)
+TRAINING_SEED = resolve_seed()
+set_global_seed(TRAINING_SEED)
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 

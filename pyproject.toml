@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Adaptively Distilled ControlNet — liver laparoscopic image synthesis"
 requires-python = ">=3.10"
 dependencies = [
-    "torch",
-    "torchvision",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
     "pytorch-lightning==2.6.1",  # pinned: 2.6.2 + 2.6.3 had a supply-chain compromise (May 2026)
     "einops",
     "omegaconf",
